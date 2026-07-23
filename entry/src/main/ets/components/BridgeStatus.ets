@@ -332,7 +332,7 @@ export struct BridgeStatus {
     keyExpiryUnixMs: 0
   };
   @State avatarLoadFailed: boolean = false;
-  @State appVersion: string = '0.8.41';
+  @State appVersion: string = '0.8.42';
   @State tailscaleVersion: string = '—';
   @State exitNodeStatus: string = '未使用出口节点';
   @State logoutStatus: string = '';
@@ -367,6 +367,7 @@ export struct BridgeStatus {
   @State taildropTextInput: string = '';
   @State taildropTransferRate: number = 0;
   @State taildropTransferEtaSeconds: number = 0;
+  @State taildropCancelPending: boolean = false;
   @State loginInProgress: boolean = false;
   @State connectInProgress: boolean = false;
   @State disconnectInProgress: boolean = false;
@@ -903,19 +904,35 @@ export struct BridgeStatus {
     this.loginInProgress = true;
     this.loginHandoffStatus = 'Preparing secure login';
     this.stopLoginPolling();
+    // First-run confirmation restarts the backend asynchronously. Starting is
+    // idempotent, so make sure a login tap also drives that startup forward.
+    if (!this.backendReady || this.backendStatus.includes('Stopped') ||
+      this.backendStatus.includes('not started')) {
+      this.startBackend(false);
+    }
     // Keep one visible frame for the in-button LoadingProgress before a fast
     // handoff switches the foreground application to the system browser.
-    this.loginPollTimer = setTimeout(() => this.pollSecureLogin(0), 600);
+    this.loginPollTimer = setTimeout(() => this.pollSecureLogin(0), 150);
   }
 
   private async pollSecureLogin(attempt: number): Promise<void> {
     try {
       const authUrl: string = await nativeBridge.backendAuthURLAsync();
-      if (authUrl.startsWith('PENDING')) {
-        if (attempt >= 24) {
+      const backendStillStarting: boolean = authUrl.startsWith('PENDING') ||
+        authUrl === 'FAILED | login URL | backend not ready' ||
+        authUrl === 'FAILED | login URL | status unavailable' ||
+        authUrl === 'FAILED | login URL | interactive login request';
+      if (backendStillStarting) {
+        if (attempt >= 60) {
           this.loginHandoffStatus = 'FAILED | login URL | timed out';
           this.loginInProgress = false;
           return;
+        }
+        if (attempt > 0 && attempt % 10 === 0) {
+          this.refreshBackendStatus();
+          if (this.backendStatus.includes('Stopped') || this.backendStatus.includes('not started')) {
+            this.startBackend(false);
+          }
         }
         this.loginPollTimer = setTimeout(() => this.pollSecureLogin(attempt + 1), 400);
         return;
@@ -1693,10 +1710,13 @@ export struct BridgeStatus {
     }
     this.updateTaildropProgressEstimate(transfer);
     this.taildropTransfer = transfer;
+    if (transfer.state === 'completed' || transfer.state === 'failed' || transfer.state === 'idle') {
+      this.taildropCancelPending = false;
+    }
     if ((transfer.state === 'completed' || transfer.state === 'failed') && transfer.requestId > 0 &&
       transfer.requestId !== this.lastHandledTaildropRequestId) {
       this.lastHandledTaildropRequestId = transfer.requestId;
-      const target: TaildropTargetSummary | undefined = this.taildropTargets.find(
+      const target: TaildropTargetSummary | undefined = this.displayedTaildropTargets().find(
         (item: TaildropTargetSummary) => item.key === transfer.targetKey);
       const targetName: string = transfer.targetName.length > 0 ? transfer.targetName :
         (target === undefined ? 'Tailscale' : target.name);
@@ -2051,7 +2071,26 @@ export struct BridgeStatus {
   }
 
   private taildropOnlineTargetCount(): number {
-    return this.taildropTargets.filter((target: TaildropTargetSummary) => target.online).length;
+    return this.displayedTaildropTargets().filter((target: TaildropTargetSummary) => target.online).length;
+  }
+
+  private displayedTaildropTargets(): TaildropTargetSummary[] {
+    if (this.isConnected()) {
+      return this.taildropTargets;
+    }
+    // Taildrop target discovery only runs inside the connected VPN backend.
+    // While disconnected, mirror the same peer snapshot rendered on Home so
+    // the disabled transfer list never diverges from the device list.
+    return this.peers.map((peer: PeerSummary): TaildropTargetSummary => {
+      return {
+        key: peer.key,
+        name: peer.name,
+        os: peer.os,
+        deviceModel: peer.deviceModel,
+        deviceType: peer.deviceType,
+        online: peer.online
+      };
+    });
   }
 
   private taildropTargetDescription(target: TaildropTargetSummary): string {
@@ -2993,6 +3032,7 @@ export struct BridgeStatus {
       this.showToast($r('app.string.transfer_cancel_failed'));
       return;
     }
+    this.taildropCancelPending = true;
     this.recordDiagnosticEvent('taildrop_send_cancel_requested', 'transfer');
   }
 
@@ -3000,13 +3040,17 @@ export struct BridgeStatus {
     if (record.direction !== 'send' || record.state !== 'failed' || this.taildropSendActive()) {
       return;
     }
-    const target: TaildropTargetSummary | undefined = this.taildropTargets.find(
+    const target: TaildropTargetSummary | undefined = this.displayedTaildropTargets().find(
       (item: TaildropTargetSummary) => item.key === record.targetKey && item.online);
     if (target === undefined) {
       this.showToast($r('app.string.transfer_send_target_unavailable'));
       return;
     }
-    this.toggleTaildropSourceChooser(target);
+    this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
+      this.expandedTaildropTargetKey = target.key;
+    });
+    this.transferScroller.scrollEdge(Edge.Top);
+    this.showToast($r('app.string.transfer_retry_choose_content'));
   }
 
   private startTaildropReceive(file: TaildropWaitingFileSummary): void {
@@ -5350,7 +5394,7 @@ export struct BridgeStatus {
   @Builder
   private TaildropTargetsPanel() {
     Column({ space: 0 }) {
-      ForEach(this.taildropTargets, (target: TaildropTargetSummary, index: number) => {
+      ForEach(this.displayedTaildropTargets(), (target: TaildropTargetSummary, index: number) => {
         if (index > 0) {
           Divider()
             .color($r('sys.color.comp_divider'))
@@ -5457,11 +5501,14 @@ export struct BridgeStatus {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         if (this.taildropTransfer.state === 'queued' || this.taildropTransfer.state === 'sending') {
-          Button($r('app.string.cancel_action'))
+          Button(this.taildropCancelPending ? $r('app.string.transfer_cancelling') :
+            $r('app.string.cancel_action'))
             .fontSize(12)
             .height(32)
             .backgroundColor(this.secondaryBackground())
             .fontColor($r('sys.color.font_primary'))
+            .enabled(!this.taildropCancelPending)
+            .opacity(this.taildropCancelPending ? 0.6 : 1)
             .onClick(() => this.cancelTaildropSend())
         }
       }
@@ -5723,7 +5770,7 @@ export struct BridgeStatus {
           .id('transfer-page-title')
           .width('100%')
           .padding({ left: 4, top: 8, bottom: 2 })
-          if (this.taildropTargets.length > 0) {
+          if (this.displayedTaildropTargets().length > 0) {
             this.TaildropTargetsPanel()
           } else {
             this.TaildropTargetsEmptyPanel()
@@ -5892,6 +5939,24 @@ export struct BridgeStatus {
           blurEffectiveEndOffset: LengthMetrics.vp(20)
         },
         originalStyle: {
+          backgroundStyle: {
+            backgroundColor: $r('sys.color.background_secondary'),
+            blurRadius: 0,
+            maskExtraHeight: 0
+          },
+          contentStyle: {
+            titleStyle: {
+              mainTitleColor: $r('sys.color.font_primary'),
+              subTitleColor: $r('sys.color.font_secondary')
+            }
+          }
+        },
+        scrollEffectStyle: {
+          backgroundStyle: {
+            backgroundColor: $r('sys.color.background_secondary'),
+            blurRadius: 0,
+            maskExtraHeight: 0
+          },
           contentStyle: {
             titleStyle: {
               mainTitleColor: $r('sys.color.font_primary'),
@@ -5907,8 +5972,7 @@ export struct BridgeStatus {
         }
       }
     })
-    .titleMode(HdsNavigationTitleMode.FREE)
-    .bindToScrollable([this.homeScroller])
+    .titleMode(HdsNavigationTitleMode.FULL)
     .hideBackButton(true)
     .mode(NavigationMode.Stack)
     .width('100%')

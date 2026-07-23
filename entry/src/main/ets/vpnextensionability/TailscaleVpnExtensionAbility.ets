@@ -171,6 +171,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private vpnConnection?: vpnExtension.VpnConnection;
   private tunFd: number = -1;
   private statusTimer: number = -1;
+  private taildropRequestTimer: number = -1;
   private statusUpdateInFlight: boolean = false;
   private backendStopWatcher?: fileIo.Watcher;
   private peerConnectivityInFlight: boolean = false;
@@ -511,6 +512,19 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
     if (this.statusTimer >= 0) {
       clearInterval(this.statusTimer);
     }
+    if (this.taildropRequestTimer >= 0) {
+      clearInterval(this.taildropRequestTimer);
+    }
+    // Request handling must not wait behind the status snapshot. That snapshot
+    // can spend several seconds querying targets and inbox files.
+    this.taildropRequestTimer = setInterval(() => {
+      if (this.destroying || this.backendStopInFlight) {
+        return;
+      }
+      this.processTaildropSendRequest();
+      this.processTaildropCancelRequest();
+      this.processTaildropReceiveRequest();
+    }, 100);
     this.statusTimer = setInterval(() => {
       if (this.statusUpdateInFlight || this.backendStopInFlight) {
         return;
@@ -529,9 +543,6 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
           this.writePeerSnapshot(snapshot.peers);
           this.writeTaildropSnapshot(snapshot.taildrop);
           this.processPeerConnectivityRequest();
-          this.processTaildropSendRequest();
-          this.processTaildropCancelRequest();
-          this.processTaildropReceiveRequest();
         })
         .catch(() => {
           if (this.destroying) {
@@ -777,6 +788,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
             this.writeAtomicTextFile(requestPath, JSON.stringify(request));
             return;
           }
+          this.persistTaildropTransfer(result);
           this.recordDiagnosticEvent('taildrop_send_cancelled', 'transfer');
         })
         .catch(() => this.recordDiagnosticEvent('taildrop_send_cancel_failed', 'extension_error'))
@@ -896,7 +908,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private validTaildropSendRequest(request: TaildropSendRequest): boolean {
     if (request.requestId <= 0 || !/^peer-[a-f0-9]{16}$/.test(request.targetKey) ||
       request.outboxRoot !== this.taildropOutboxRoot() ||
-      request.files.length === 0 || request.files.length > 10) {
+      request.files.length === 0 || request.files.length > 100) {
       return false;
     }
     const rootPrefix: string = `${request.outboxRoot}/`;
@@ -1116,6 +1128,10 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
     if (this.statusTimer >= 0) {
       clearInterval(this.statusTimer);
       this.statusTimer = -1;
+    }
+    if (this.taildropRequestTimer >= 0) {
+      clearInterval(this.taildropRequestTimer);
+      this.taildropRequestTimer = -1;
     }
     const connection = this.vpnConnection;
     this.vpnConnection = undefined;

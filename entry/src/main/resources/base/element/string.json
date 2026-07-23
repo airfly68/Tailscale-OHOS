@@ -129,6 +129,10 @@
       "value": "Could not cancel the transfer."
     },
     {
+      "name": "transfer_cancelling",
+      "value": "Cancelling"
+    },
+    {
       "name": "transfer_send_cancelled",
       "value": "File transfer cancelled."
     },
@@ -275,6 +279,10 @@
     {
       "name": "transfer_retry_action",
       "value": "Retry"
+    },
+    {
+      "name": "transfer_retry_choose_content",
+      "value": "Choose the content to resend."
     },
     {
       "name": "transfer_sent_status",
