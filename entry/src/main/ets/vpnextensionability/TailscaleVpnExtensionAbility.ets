@@ -171,6 +171,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private vpnConnection?: vpnExtension.VpnConnection;
   private tunFd: number = -1;
   private statusTimer: number = -1;
+  private taildropRequestTimer: number = -1;
   private statusUpdateInFlight: boolean = false;
   private backendStopWatcher?: fileIo.Watcher;
   private peerConnectivityInFlight: boolean = false;
@@ -387,7 +388,16 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   }
 
   private writeVpnConfigSummary(config: vpnExtension.VpnConfig): void {
+    const addresses: vpnExtension.LinkAddress[] = config.addresses ?? [];
     const routes: vpnExtension.RouteInfo[] = config.routes ?? [];
+    const hasIPv4Address: boolean = addresses.some((address: vpnExtension.LinkAddress) =>
+      address.address.family === 1);
+    const hasIPv6Address: boolean = addresses.some((address: vpnExtension.LinkAddress) =>
+      address.address.family === 2);
+    const hasTailnetIPv4: boolean = routes.some((route: vpnExtension.RouteInfo) =>
+      route.destination.address.address === '100.64.0.0' && route.destination.prefixLength === 10);
+    const hasTailnetIPv6: boolean = routes.some((route: vpnExtension.RouteInfo) =>
+      route.destination.address.address === 'fd7a:115c:a1e0::' && route.destination.prefixLength === 48);
     const hasDefaultIPv4: boolean = routes.some((route: vpnExtension.RouteInfo) =>
       route.destination.address.address === '0.0.0.0' && route.destination.prefixLength === 0 &&
       route.isDefaultRoute);
@@ -395,7 +405,12 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       route.destination.address.address === '::' && route.destination.prefixLength === 0 &&
       route.isDefaultRoute);
     this.writeTextFile(`${this.context.filesDir}/${VPN_CONFIG_SUMMARY_FILE_NAME}`,
-      `routes=${routes.length} | defaultIPv4=${hasDefaultIPv4} | defaultIPv6=${hasDefaultIPv6}`);
+      `addressCount=${addresses.length} | routeCount=${routes.length} | ` +
+      `hasIPv4Address=${hasIPv4Address} | hasIPv6Address=${hasIPv6Address} | ` +
+      `hasTailnetIPv4=${hasTailnetIPv4} | hasTailnetIPv6=${hasTailnetIPv6} | ` +
+      `hasDefaultIPv4=${hasDefaultIPv4} | hasDefaultIPv6=${hasDefaultIPv6} | ` +
+      `ipv4Accepted=${config.isIPv4Accepted} | ipv6Accepted=${config.isIPv6Accepted} | ` +
+      `mtu=${config.mtu}`);
   }
 
   private vpnReplaceApprovalFilePath(): string {
@@ -511,6 +526,19 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
     if (this.statusTimer >= 0) {
       clearInterval(this.statusTimer);
     }
+    if (this.taildropRequestTimer >= 0) {
+      clearInterval(this.taildropRequestTimer);
+    }
+    // Request handling must not wait behind the status snapshot. That snapshot
+    // can spend several seconds querying targets and inbox files.
+    this.taildropRequestTimer = setInterval(() => {
+      if (this.destroying || this.backendStopInFlight) {
+        return;
+      }
+      this.processTaildropSendRequest();
+      this.processTaildropCancelRequest();
+      this.processTaildropReceiveRequest();
+    }, 100);
     this.statusTimer = setInterval(() => {
       if (this.statusUpdateInFlight || this.backendStopInFlight) {
         return;
@@ -529,9 +557,6 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
           this.writePeerSnapshot(snapshot.peers);
           this.writeTaildropSnapshot(snapshot.taildrop);
           this.processPeerConnectivityRequest();
-          this.processTaildropSendRequest();
-          this.processTaildropCancelRequest();
-          this.processTaildropReceiveRequest();
         })
         .catch(() => {
           if (this.destroying) {
@@ -777,6 +802,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
             this.writeAtomicTextFile(requestPath, JSON.stringify(request));
             return;
           }
+          this.persistTaildropTransfer(result);
           this.recordDiagnosticEvent('taildrop_send_cancelled', 'transfer');
         })
         .catch(() => this.recordDiagnosticEvent('taildrop_send_cancel_failed', 'extension_error'))
@@ -896,7 +922,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private validTaildropSendRequest(request: TaildropSendRequest): boolean {
     if (request.requestId <= 0 || !/^peer-[a-f0-9]{16}$/.test(request.targetKey) ||
       request.outboxRoot !== this.taildropOutboxRoot() ||
-      request.files.length === 0 || request.files.length > 10) {
+      request.files.length === 0 || request.files.length > 100) {
       return false;
     }
     const rootPrefix: string = `${request.outboxRoot}/`;
@@ -1116,6 +1142,10 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
     if (this.statusTimer >= 0) {
       clearInterval(this.statusTimer);
       this.statusTimer = -1;
+    }
+    if (this.taildropRequestTimer >= 0) {
+      clearInterval(this.taildropRequestTimer);
+      this.taildropRequestTimer = -1;
     }
     const connection = this.vpnConnection;
     this.vpnConnection = undefined;

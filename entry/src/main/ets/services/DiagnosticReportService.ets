@@ -7,6 +7,7 @@ import { DiagnosticEvent, DiagnosticEventStore } from './DiagnosticEventStore';
 
 const REPORT_PREFIX: string = 'TailscaleOHOS-Diagnostic-';
 const REPORT_RETENTION_MS: number = 24 * 60 * 60 * 1000;
+const VPN_CONFIG_SUMMARY_FILE_NAME: string = 'vpn-config-summary.txt';
 
 export interface DiagnosticReportInput {
   appVersion: string;
@@ -74,6 +75,32 @@ interface DiagnosticStatusSet {
   magicDNS: DiagnosticCheck;
 }
 
+interface DiagnosticVpnConfig {
+  available: boolean;
+  addressCount: number;
+  routeCount: number;
+  hasIPv4Address: boolean;
+  hasIPv6Address: boolean;
+  hasTailnetIPv4: boolean;
+  hasTailnetIPv6: boolean;
+  hasDefaultIPv4: boolean;
+  hasDefaultIPv6: boolean;
+  ipv4Accepted: boolean;
+  ipv6Accepted: boolean;
+  mtu: number;
+}
+
+interface DiagnosticTunCounters {
+  available: boolean;
+  session: number;
+  systemToEnginePackets: number;
+  systemToEngineBytes: number;
+  engineToSystemPackets: number;
+  engineToSystemBytes: number;
+  readErrors: number;
+  writeErrors: number;
+}
+
 interface DiagnosticPrivacy {
   rawHiLogIncluded: boolean;
   rawBackendSnapshotIncluded: boolean;
@@ -88,6 +115,8 @@ interface DiagnosticReport {
   application: DiagnosticApplication;
   network: DiagnosticNetwork;
   status: DiagnosticStatusSet;
+  vpnConfig: DiagnosticVpnConfig;
+  tunCounters: DiagnosticTunCounters;
   events: DiagnosticEvent[];
   privacy: DiagnosticPrivacy;
 }
@@ -147,7 +176,7 @@ export class DiagnosticReportService {
     input: DiagnosticReportInput): DiagnosticReport {
     const model: string = DiagnosticReportService.deviceModel();
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: generatedAt.toISOString(),
       device: {
         brand: DiagnosticReportService.safeLabel(deviceInfo.brand, 'unknown'),
@@ -181,6 +210,8 @@ export class DiagnosticReportService {
         vpnExtension: DiagnosticReportService.classifyStatus(input.vpnStatus),
         magicDNS: DiagnosticReportService.classifyStatus(input.magicDNSStatus)
       },
+      vpnConfig: DiagnosticReportService.readVpnConfig(filesDir),
+      tunCounters: DiagnosticReportService.readTunCounters(input.vpnStatus),
       events: DiagnosticEventStore.load(filesDir),
       privacy: {
         rawHiLogIncluded: false,
@@ -216,6 +247,78 @@ export class DiagnosticReportService {
     };
   }
 
+  private static readVpnConfig(filesDir: string): DiagnosticVpnConfig {
+    const unavailable: DiagnosticVpnConfig = {
+      available: false,
+      addressCount: 0,
+      routeCount: 0,
+      hasIPv4Address: false,
+      hasIPv6Address: false,
+      hasTailnetIPv4: false,
+      hasTailnetIPv6: false,
+      hasDefaultIPv4: false,
+      hasDefaultIPv6: false,
+      ipv4Accepted: false,
+      ipv6Accepted: false,
+      mtu: 0
+    };
+    try {
+      const path: string = `${filesDir}/${VPN_CONFIG_SUMMARY_FILE_NAME}`;
+      if (!fileIo.accessSync(path)) {
+        return unavailable;
+      }
+      const summary: string = fileIo.readTextSync(path);
+      if (summary.trim().length === 0) {
+        return unavailable;
+      }
+      return {
+        available: true,
+        addressCount: DiagnosticReportService.statusNumber(summary, 'addressCount'),
+        routeCount: DiagnosticReportService.statusNumber(summary, 'routeCount'),
+        hasIPv4Address: DiagnosticReportService.statusBoolean(summary, 'hasIPv4Address'),
+        hasIPv6Address: DiagnosticReportService.statusBoolean(summary, 'hasIPv6Address'),
+        hasTailnetIPv4: DiagnosticReportService.statusBoolean(summary, 'hasTailnetIPv4'),
+        hasTailnetIPv6: DiagnosticReportService.statusBoolean(summary, 'hasTailnetIPv6'),
+        hasDefaultIPv4: DiagnosticReportService.statusBoolean(summary, 'hasDefaultIPv4'),
+        hasDefaultIPv6: DiagnosticReportService.statusBoolean(summary, 'hasDefaultIPv6'),
+        ipv4Accepted: DiagnosticReportService.statusBoolean(summary, 'ipv4Accepted'),
+        ipv6Accepted: DiagnosticReportService.statusBoolean(summary, 'ipv6Accepted'),
+        mtu: DiagnosticReportService.statusNumber(summary, 'mtu')
+      };
+    } catch (_error) {
+      return unavailable;
+    }
+  }
+
+  private static readTunCounters(status: string): DiagnosticTunCounters {
+    return {
+      available: DiagnosticReportService.hasStatusKey(status, 'trafficSession'),
+      session: DiagnosticReportService.statusNumber(status, 'trafficSession'),
+      systemToEnginePackets: DiagnosticReportService.statusNumber(status, 'tunRead'),
+      systemToEngineBytes: DiagnosticReportService.statusNumber(status, 'txBytes'),
+      engineToSystemPackets: DiagnosticReportService.statusNumber(status, 'tunWrite'),
+      engineToSystemBytes: DiagnosticReportService.statusNumber(status, 'rxBytes'),
+      readErrors: DiagnosticReportService.statusNumber(status, 'tunReadErrors'),
+      writeErrors: DiagnosticReportService.statusNumber(status, 'tunWriteErrors')
+    };
+  }
+
+  private static hasStatusKey(status: string, key: string): boolean {
+    return new RegExp(`(?:^|\\|\\s*)${key}=`).test(status);
+  }
+
+  private static statusNumber(status: string, key: string): number {
+    const match: RegExpMatchArray | null = status.match(
+      new RegExp(`(?:^|\\|\\s*)${key}=(\\d+)`));
+    return match === null ? 0 : DiagnosticReportService.nonNegative(Number(match[1]));
+  }
+
+  private static statusBoolean(status: string, key: string): boolean {
+    const match: RegExpMatchArray | null = status.match(
+      new RegExp(`(?:^|\\|\\s*)${key}=(true|false)`));
+    return match !== null && match[1] === 'true';
+  }
+
   private static buildSummary(report: DiagnosticReport): string {
     const lines: string[] = [
       'Tailscale OHOS Diagnostic Report',
@@ -243,6 +346,30 @@ export class DiagnosticReportService {
       `Backend: ${report.status.backend.state}`,
       `VPN extension: ${report.status.vpnExtension.state}`,
       `MagicDNS: ${report.status.magicDNS.state}`,
+      '',
+      'Submitted VPN configuration (addresses redacted)',
+      `Available: ${report.vpnConfig.available}`,
+      `Addresses: ${report.vpnConfig.addressCount}`,
+      `Routes: ${report.vpnConfig.routeCount}`,
+      `IPv4 address present: ${report.vpnConfig.hasIPv4Address}`,
+      `IPv6 address present: ${report.vpnConfig.hasIPv6Address}`,
+      `Tailnet IPv4 route submitted: ${report.vpnConfig.hasTailnetIPv4}`,
+      `Tailnet IPv6 route submitted: ${report.vpnConfig.hasTailnetIPv6}`,
+      `Default IPv4 route submitted: ${report.vpnConfig.hasDefaultIPv4}`,
+      `Default IPv6 route submitted: ${report.vpnConfig.hasDefaultIPv6}`,
+      `IPv4 accepted: ${report.vpnConfig.ipv4Accepted}`,
+      `IPv6 accepted: ${report.vpnConfig.ipv6Accepted}`,
+      `MTU: ${report.vpnConfig.mtu}`,
+      '',
+      'TUN data path counters',
+      `Available: ${report.tunCounters.available}`,
+      `Session: ${report.tunCounters.session}`,
+      `System to engine: ${report.tunCounters.systemToEnginePackets} packets / ` +
+        `${report.tunCounters.systemToEngineBytes} bytes`,
+      `Engine to system: ${report.tunCounters.engineToSystemPackets} packets / ` +
+        `${report.tunCounters.engineToSystemBytes} bytes`,
+      `Read errors: ${report.tunCounters.readErrors}`,
+      `Write errors: ${report.tunCounters.writeErrors}`,
       `Structured events: ${report.events.length}`,
       '',
       'Privacy',

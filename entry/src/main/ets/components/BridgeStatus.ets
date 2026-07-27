@@ -4,13 +4,7 @@ import { vpnExtension } from '@kit.NetworkKit';
 import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { LengthMetrics } from '@kit.ArkUI';
-import {
-  PhotoPickerComponent,
-  PickerController,
-  PickerOptions,
-  ReminderMode,
-  photoAccessHelper
-} from '@kit.MediaLibraryKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { DiagnosticEventStore } from '../services/DiagnosticEventStore';
 import {
   DiagnosticReportInput,
@@ -56,6 +50,8 @@ const TAILDROP_RECEIVE_REQUEST_FILE_NAME: string = 'taildrop-receive-request.jso
 const TAILDROP_RECEIVE_RESPONSE_FILE_NAME: string = 'taildrop-receive-response.json';
 const TAILDROP_HISTORY_FILE_NAME: string = 'taildrop-history.json';
 const TAILDROP_HISTORY_LIMIT: number = 10;
+const TAILDROP_MAX_FILE_SELECTION: number = 10;
+const TAILDROP_MAX_MEDIA_SELECTION: number = 100;
 const TAILDROP_TEXT_CLIPBOARD_MAX_BYTES: number = 1024 * 1024;
 const TAILDROP_IMAGE_EXTENSIONS: string[] = [
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'dng'
@@ -336,7 +332,7 @@ export struct BridgeStatus {
     keyExpiryUnixMs: 0
   };
   @State avatarLoadFailed: boolean = false;
-  @State appVersion: string = '0.8.32';
+  @State appVersion: string = '0.8.42';
   @State tailscaleVersion: string = '—';
   @State exitNodeStatus: string = '未使用出口节点';
   @State logoutStatus: string = '';
@@ -367,11 +363,11 @@ export struct BridgeStatus {
   @State taildropReceiveInProgress: boolean = false;
   @State taildropReceiveRouting: boolean = false;
   @State expandedTaildropTargetKey: string = '';
-  @State @Watch('onTaildropPhotoPickerVisibilityChanged') taildropPhotoPickerVisible: boolean = false;
-  @State taildropPhotoPickerController: PickerController = new PickerController();
-  @State taildropPhotoUris: string[] = [];
+  @State @Watch('onTaildropTextEditorVisibilityChanged') taildropTextEditorVisible: boolean = false;
+  @State taildropTextInput: string = '';
   @State taildropTransferRate: number = 0;
   @State taildropTransferEtaSeconds: number = 0;
+  @State taildropCancelPending: boolean = false;
   @State loginInProgress: boolean = false;
   @State connectInProgress: boolean = false;
   @State disconnectInProgress: boolean = false;
@@ -404,6 +400,7 @@ export struct BridgeStatus {
   private healthPollTimer: number = -1;
   private loginPollTimer: number = -1;
   private magicDNSProbeUrl: string = '';
+  private homeScroller: Scroller = new Scroller();
   private transferScroller: Scroller = new Scroller();
   private settingsScroller: Scroller = new Scroller();
   private tabsController: HdsTabsController = new HdsTabsController();
@@ -434,8 +431,7 @@ export struct BridgeStatus {
   private taildropReceiveMediaType?: photoAccessHelper.PhotoType;
   private taildropReceiveStrategy: string = 'none';
   private taildropPickerOpen: boolean = false;
-  private taildropPhotoPickerOptions: PickerOptions = new PickerOptions();
-  private taildropPhotoTarget?: TaildropTargetSummary;
+  private taildropTextTarget?: TaildropTargetSummary;
   private peerDataSource: PeerDataSource = new PeerDataSource();
   private appForegroundListener: () => void = () => this.handleAppForeground();
 
@@ -908,19 +904,35 @@ export struct BridgeStatus {
     this.loginInProgress = true;
     this.loginHandoffStatus = 'Preparing secure login';
     this.stopLoginPolling();
+    // First-run confirmation restarts the backend asynchronously. Starting is
+    // idempotent, so make sure a login tap also drives that startup forward.
+    if (!this.backendReady || this.backendStatus.includes('Stopped') ||
+      this.backendStatus.includes('not started')) {
+      this.startBackend(false);
+    }
     // Keep one visible frame for the in-button LoadingProgress before a fast
     // handoff switches the foreground application to the system browser.
-    this.loginPollTimer = setTimeout(() => this.pollSecureLogin(0), 600);
+    this.loginPollTimer = setTimeout(() => this.pollSecureLogin(0), 150);
   }
 
   private async pollSecureLogin(attempt: number): Promise<void> {
     try {
       const authUrl: string = await nativeBridge.backendAuthURLAsync();
-      if (authUrl.startsWith('PENDING')) {
-        if (attempt >= 24) {
+      const backendStillStarting: boolean = authUrl.startsWith('PENDING') ||
+        authUrl === 'FAILED | login URL | backend not ready' ||
+        authUrl === 'FAILED | login URL | status unavailable' ||
+        authUrl === 'FAILED | login URL | interactive login request';
+      if (backendStillStarting) {
+        if (attempt >= 60) {
           this.loginHandoffStatus = 'FAILED | login URL | timed out';
           this.loginInProgress = false;
           return;
+        }
+        if (attempt > 0 && attempt % 10 === 0) {
+          this.refreshBackendStatus();
+          if (this.backendStatus.includes('Stopped') || this.backendStatus.includes('not started')) {
+            this.startBackend(false);
+          }
         }
         this.loginPollTimer = setTimeout(() => this.pollSecureLogin(attempt + 1), 400);
         return;
@@ -1698,10 +1710,13 @@ export struct BridgeStatus {
     }
     this.updateTaildropProgressEstimate(transfer);
     this.taildropTransfer = transfer;
+    if (transfer.state === 'completed' || transfer.state === 'failed' || transfer.state === 'idle') {
+      this.taildropCancelPending = false;
+    }
     if ((transfer.state === 'completed' || transfer.state === 'failed') && transfer.requestId > 0 &&
       transfer.requestId !== this.lastHandledTaildropRequestId) {
       this.lastHandledTaildropRequestId = transfer.requestId;
-      const target: TaildropTargetSummary | undefined = this.taildropTargets.find(
+      const target: TaildropTargetSummary | undefined = this.displayedTaildropTargets().find(
         (item: TaildropTargetSummary) => item.key === transfer.targetKey);
       const targetName: string = transfer.targetName.length > 0 ? transfer.targetName :
         (target === undefined ? 'Tailscale' : target.name);
@@ -2056,7 +2071,26 @@ export struct BridgeStatus {
   }
 
   private taildropOnlineTargetCount(): number {
-    return this.taildropTargets.filter((target: TaildropTargetSummary) => target.online).length;
+    return this.displayedTaildropTargets().filter((target: TaildropTargetSummary) => target.online).length;
+  }
+
+  private displayedTaildropTargets(): TaildropTargetSummary[] {
+    if (this.isConnected()) {
+      return this.taildropTargets;
+    }
+    // Taildrop target discovery only runs inside the connected VPN backend.
+    // While disconnected, mirror the same peer snapshot rendered on Home so
+    // the disabled transfer list never diverges from the device list.
+    return this.peers.map((peer: PeerSummary): TaildropTargetSummary => {
+      return {
+        key: peer.key,
+        name: peer.name,
+        os: peer.os,
+        deviceModel: peer.deviceModel,
+        deviceType: peer.deviceType,
+        online: peer.online
+      };
+    });
   }
 
   private taildropTargetDescription(target: TaildropTargetSummary): string {
@@ -2813,7 +2847,9 @@ export struct BridgeStatus {
       this.taildropSendActive()) {
       return;
     }
-    this.expandedTaildropTargetKey = this.expandedTaildropTargetKey === target.key ? '' : target.key;
+    this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
+      this.expandedTaildropTargetKey = this.expandedTaildropTargetKey === target.key ? '' : target.key;
+    });
   }
 
   private chooseTaildropDocuments(target: TaildropTargetSummary): void {
@@ -2825,11 +2861,24 @@ export struct BridgeStatus {
 
   private chooseTaildropPhotos(target: TaildropTargetSummary): void {
     this.expandedTaildropTargetKey = '';
-    this.openTaildropPhotoPicker(target);
+    this.selectTaildropMedia(target).catch(() => {
+      this.handleTaildropSelectionFailure();
+    });
+  }
+
+  private chooseTaildropText(target: TaildropTargetSummary): void {
+    if (!target.online || !this.isConnected() || this.taildropState !== 'ready' ||
+      this.taildropSendActive()) {
+      return;
+    }
+    this.expandedTaildropTargetKey = '';
+    this.taildropTextInput = '';
+    this.taildropTextTarget = target;
+    this.taildropPickerOpen = true;
+    this.taildropTextEditorVisible = true;
   }
 
   private handleTaildropSelectionFailure(): void {
-    this.taildropPhotoPickerVisible = false;
     this.taildropPickerOpen = false;
     this.taildropPreparing = false;
     this.showToast($r('app.string.transfer_file_selection_failed'));
@@ -2844,7 +2893,7 @@ export struct BridgeStatus {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const documentPicker = new picker.DocumentViewPicker(context);
     const options = new picker.DocumentSelectOptions();
-    options.maxSelectNumber = 10;
+    options.maxSelectNumber = TAILDROP_MAX_FILE_SELECTION;
     let uris: string[] = [];
     try {
       uris = await documentPicker.select(options);
@@ -2856,52 +2905,75 @@ export struct BridgeStatus {
     }
   }
 
-  private openTaildropPhotoPicker(target: TaildropTargetSummary): void {
+  private async selectTaildropMedia(target: TaildropTargetSummary): Promise<void> {
     if (!target.online || !this.isConnected() || this.taildropState !== 'ready' ||
       this.taildropSendActive()) {
       return;
     }
-    this.taildropPhotoUris = [];
-    this.taildropPhotoTarget = target;
-    this.taildropPhotoPickerController = new PickerController();
-    this.taildropPhotoPickerOptions = new PickerOptions();
-    this.taildropPhotoPickerOptions.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
-    this.taildropPhotoPickerOptions.maxSelectNumber = 10;
-    this.taildropPhotoPickerOptions.maxSelectedReminderMode = ReminderMode.TOAST;
-    this.taildropPhotoPickerOptions.isSearchSupported = true;
-    this.taildropPhotoPickerOptions.isPhotoTakingSupported = true;
     this.taildropPickerOpen = true;
-    this.taildropPhotoPickerVisible = true;
-  }
-
-  private onTaildropPhotoPickerVisibilityChanged(): void {
-    if (!this.taildropPhotoPickerVisible) {
+    const mediaPicker = new photoAccessHelper.PhotoViewPicker();
+    const options = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_VIDEO_TYPE;
+    options.maxSelectNumber = TAILDROP_MAX_MEDIA_SELECTION;
+    options.isSearchSupported = true;
+    options.isPhotoTakingSupported = true;
+    let uris: string[] = [];
+    try {
+      const result: photoAccessHelper.PhotoSelectResult = await mediaPicker.select(options);
+      uris = result.photoUris;
+    } finally {
       this.taildropPickerOpen = false;
-      this.taildropPhotoTarget = undefined;
+    }
+    if (uris.length > 0) {
+      await this.queueTaildropFiles(target, uris);
     }
   }
 
-  private selectTaildropPhoto(uri: string): void {
-    if (!this.taildropPhotoUris.includes(uri) && this.taildropPhotoUris.length < 10) {
-      this.taildropPhotoUris = [...this.taildropPhotoUris, uri];
+  private onTaildropTextEditorVisibilityChanged(): void {
+    if (!this.taildropTextEditorVisible) {
+      this.taildropPickerOpen = false;
+      this.taildropTextTarget = undefined;
     }
   }
 
-  private deselectTaildropPhoto(uri: string): void {
-    this.taildropPhotoUris = this.taildropPhotoUris.filter((selectedUri: string) => selectedUri !== uri);
-  }
-
-  private confirmTaildropPhotoSelection(): void {
-    const target: TaildropTargetSummary | undefined = this.taildropPhotoTarget;
-    const uris: string[] = [...this.taildropPhotoUris];
-    if (target === undefined || uris.length === 0) {
+  private sendTaildropText(): void {
+    const target: TaildropTargetSummary | undefined = this.taildropTextTarget;
+    const text: string = this.taildropTextInput;
+    if (target === undefined || text.trim().length === 0) {
       return;
     }
-    this.taildropPhotoPickerVisible = false;
+    this.taildropTextEditorVisible = false;
     this.taildropPickerOpen = false;
-    this.queueTaildropFiles(target, uris).catch(() => {
+    this.queueTaildropText(target, text).catch(() => {
       this.handleTaildropSelectionFailure();
     });
+  }
+
+  private async queueTaildropText(target: TaildropTargetSummary, text: string): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const path: string = `${context.cacheDir}/taildrop-text-${Date.now()}.txt`;
+    let file: fileIo.File | undefined = undefined;
+    try {
+      file = fileIo.openSync(path,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, text);
+      fileIo.closeSync(file);
+      file = undefined;
+      await this.queueTaildropFiles(target, [fileUri.getUriFromPath(path)]);
+    } finally {
+      if (file !== undefined) {
+        try {
+          fileIo.closeSync(file);
+        } catch (_closeError) {
+        }
+      }
+      try {
+        if (fileIo.accessSync(path)) {
+          fileIo.unlinkSync(path);
+        }
+      } catch (_cleanupError) {
+      }
+    }
   }
 
   private async queueTaildropFiles(target: TaildropTargetSummary, uris: string[]): Promise<void> {
@@ -2914,7 +2986,7 @@ export struct BridgeStatus {
     const requestId: number = Date.now();
     let files: TaildropSendFile[] = [];
     try {
-      files = await this.prepareTaildropFiles(uris.slice(0, 10), requestId);
+      files = await this.prepareTaildropFiles(uris.slice(0, TAILDROP_MAX_MEDIA_SELECTION), requestId);
       let totalBytes: number = 0;
       files.forEach((file: TaildropSendFile) => {
         totalBytes += file.size;
@@ -2960,6 +3032,7 @@ export struct BridgeStatus {
       this.showToast($r('app.string.transfer_cancel_failed'));
       return;
     }
+    this.taildropCancelPending = true;
     this.recordDiagnosticEvent('taildrop_send_cancel_requested', 'transfer');
   }
 
@@ -2967,13 +3040,17 @@ export struct BridgeStatus {
     if (record.direction !== 'send' || record.state !== 'failed' || this.taildropSendActive()) {
       return;
     }
-    const target: TaildropTargetSummary | undefined = this.taildropTargets.find(
+    const target: TaildropTargetSummary | undefined = this.displayedTaildropTargets().find(
       (item: TaildropTargetSummary) => item.key === record.targetKey && item.online);
     if (target === undefined) {
       this.showToast($r('app.string.transfer_send_target_unavailable'));
       return;
     }
-    this.toggleTaildropSourceChooser(target);
+    this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
+      this.expandedTaildropTargetKey = target.key;
+    });
+    this.transferScroller.scrollEdge(Edge.Top);
+    this.showToast($r('app.string.transfer_retry_choose_content'));
   }
 
   private startTaildropReceive(file: TaildropWaitingFileSummary): void {
@@ -5188,65 +5265,35 @@ export struct BridgeStatus {
 
   @Builder
   private HomeContent() {
-    Column({ space: 12 }) {
-      this.ConnectionPanel()
-      this.ExitNodePanel()
-      if (this.isBackendLoading() || this.devicesLoading) {
-        this.DevicesLoadingPanel()
-      } else if (!this.isAuthenticated()) {
-        this.DevicesSignedOutPanel()
-      } else {
-        this.DevicesPanel()
+    Scroll(this.homeScroller) {
+      Column({ space: 12 }) {
+        this.ConnectionPanel()
+        this.ExitNodePanel()
+        if (this.isBackendLoading() || this.devicesLoading) {
+          this.DevicesLoadingPanel()
+        } else if (!this.isAuthenticated()) {
+          this.DevicesSignedOutPanel()
+        } else {
+          this.DevicesPanel()
+        }
       }
+      .width('100%')
+      .constraintSize({ maxWidth: 1200 })
+      .padding({
+        left: this.contentMargin(),
+        right: this.contentMargin(),
+        top: 8,
+        bottom: this.pageBottomInset()
+      })
+      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
     .height('100%')
-    .constraintSize({ maxWidth: 1200 })
-    .padding({
-      left: this.contentMargin(),
-      right: this.contentMargin(),
-      top: 8,
-      bottom: this.pageBottomInset()
-    })
-    .alignItems(HorizontalAlign.Center)
     .backgroundColor($r('sys.color.background_secondary'))
-  }
-
-  @Builder
-  private TransferOverviewPanel() {
-    Column({ space: 12 }) {
-      Row({ space: 12 }) {
-        Stack() {
-          SymbolGlyph($r('sys.symbol.doc'))
-            .fontSize(26)
-            .fontColor([$r('sys.color.icon_emphasize')])
-        }
-        .width(44)
-        .height(44)
-        .borderRadius(14)
-        .backgroundColor(this.secondaryBackground())
-
-        Column({ space: 3 }) {
-          Text($r('app.string.transfer_taildrop_title'))
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('sys.color.font_primary'))
-            .width('100%')
-          Text($r('app.string.transfer_taildrop_description'))
-            .fontSize(12)
-            .fontColor($r('sys.color.font_secondary'))
-            .lineHeight(18)
-            .width('100%')
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-      }
-      .width('100%')
-    }
-    .width('100%')
-    .padding(14)
-    .backgroundColor(this.groupBackground())
-    .borderRadius(16)
+    .edgeEffect(EdgeEffect.Spring)
+    .scrollBar(BarState.Auto)
+    .scrollBarWidth(4)
+    .align(Alignment.TopStart)
   }
 
   @Builder
@@ -5283,13 +5330,13 @@ export struct BridgeStatus {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        if (target.online) {
+        if (target.online && this.isConnected() && this.taildropState === 'ready') {
           SymbolGlyph($r('sys.symbol.chevron_down'))
             .fontSize(18)
             .fontColor([$r('sys.color.icon_secondary')])
             .rotate({ angle: this.expandedTaildropTargetKey === target.key ? 180 : 0 })
             .animation({ duration: 180, curve: Curve.EaseInOut })
-        } else {
+        } else if (!target.online) {
           Text($r('app.string.peer_offline'))
             .fontSize(11)
             .fontColor($r('sys.color.font_secondary'))
@@ -5304,24 +5351,34 @@ export struct BridgeStatus {
         }
       })
 
-      if (target.online && this.expandedTaildropTargetKey === target.key) {
-        Row({ space: 10 }) {
-          Button($r('app.string.transfer_file_action'))
-            .layoutWeight(1)
-            .height(40)
-            .type(ButtonType.Normal)
-            .borderRadius(12)
-            .backgroundColor(this.secondaryBackground())
-            .fontColor($r('sys.color.font_primary'))
-            .onClick(() => this.chooseTaildropDocuments(target))
-          Button($r('app.string.transfer_photo_action'))
-            .layoutWeight(1)
-            .height(40)
-            .type(ButtonType.Normal)
-            .borderRadius(12)
-            .backgroundColor(this.secondaryBackground())
-            .fontColor($r('sys.color.font_primary'))
-            .onClick(() => this.chooseTaildropPhotos(target))
+      if (target.online && this.isConnected() && this.taildropState === 'ready' &&
+        this.expandedTaildropTargetKey === target.key) {
+        Column() {
+          Row({ space: 0 }) {
+            this.PeerActionSegment($r('app.string.transfer_file_action'),
+              'taildrop-file-' + target.key, true, false,
+              () => this.chooseTaildropDocuments(target))
+            Divider()
+              .vertical(true)
+              .height(18)
+              .color($r('sys.color.comp_divider'))
+            this.PeerActionSegment($r('app.string.transfer_photo_action'),
+              'taildrop-media-' + target.key, true, false,
+              () => this.chooseTaildropPhotos(target))
+            Divider()
+              .vertical(true)
+              .height(18)
+              .color($r('sys.color.comp_divider'))
+            this.PeerActionSegment($r('app.string.transfer_text_action'),
+              'taildrop-text-' + target.key, true, false,
+              () => this.chooseTaildropText(target))
+          }
+          .width('100%')
+          .height(36)
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor(this.secondaryBackground())
+          .borderRadius(18)
+          .clip(true)
         }
         .width('100%')
         .padding({ left: 62, right: 12, bottom: 10 })
@@ -5329,14 +5386,15 @@ export struct BridgeStatus {
     }
     .id('taildrop-target-' + target.key)
     .width('100%')
-    .opacity(target.online && !this.taildropSendActive() ? 1 : 0.62)
-    .animation({ duration: 180, curve: Curve.EaseInOut })
+    .opacity(target.online && this.isConnected() && this.taildropState === 'ready' &&
+      !this.taildropSendActive() ? 1 : 0.42)
+    .animation({ duration: 260, curve: Curve.EaseInOut })
   }
 
   @Builder
   private TaildropTargetsPanel() {
     Column({ space: 0 }) {
-      ForEach(this.taildropTargets, (target: TaildropTargetSummary, index: number) => {
+      ForEach(this.displayedTaildropTargets(), (target: TaildropTargetSummary, index: number) => {
         if (index > 0) {
           Divider()
             .color($r('sys.color.comp_divider'))
@@ -5356,9 +5414,9 @@ export struct BridgeStatus {
 
   @Builder
   private TaildropTargetsEmptyPanel() {
-    Text(this.taildropState === 'disabled' ?
-      $r('app.string.transfer_admin_disabled_description') :
-      $r('app.string.transfer_no_targets_description'))
+    Text(!this.isConnected() ? $r('app.string.transfer_connect_first_description') :
+      this.taildropState === 'disabled' ? $r('app.string.transfer_admin_disabled_description') :
+        $r('app.string.transfer_no_targets_description'))
       .fontSize(12)
       .fontColor($r('sys.color.font_secondary'))
       .lineHeight(18)
@@ -5370,33 +5428,43 @@ export struct BridgeStatus {
   }
 
   @Builder
-  private TaildropPhotoPickerSheet() {
-    Column() {
-      Row({ space: 12 }) {
-        Text($r('app.string.transfer_photo_picker_count', this.taildropPhotoUris.length, 10))
-          .fontSize(12)
-          .fontColor($r('sys.color.font_secondary'))
+  private TaildropTextEditorSheet() {
+    Column({ space: 14 }) {
+      TextArea({
+        text: this.taildropTextInput,
+        placeholder: $r('app.string.transfer_text_placeholder')
+      })
+        .width('100%')
+        .height(180)
+        .padding(12)
+        .fontSize(14)
+        .fontColor($r('sys.color.font_primary'))
+        .placeholderColor($r('sys.color.font_secondary'))
+        .backgroundColor(this.secondaryBackground())
+        .borderRadius(14)
+        .onChange((value: string) => {
+          this.taildropTextInput = value;
+        })
+      Row({ space: 10 }) {
+        Button($r('app.string.cancel_action'))
           .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.secondaryBackground())
+          .fontColor($r('sys.color.font_primary'))
+          .onClick(() => {
+            this.taildropTextEditorVisible = false;
+          })
         Button($r('app.string.transfer_send_action'))
-          .height(36)
-          .enabled(this.taildropPhotoUris.length > 0)
-          .opacity(this.taildropPhotoUris.length > 0 ? 1 : 0.5)
-          .onClick(() => this.confirmTaildropPhotoSelection())
+          .layoutWeight(1)
+          .height(40)
+          .enabled(this.taildropTextInput.trim().length > 0)
+          .opacity(this.taildropTextInput.trim().length > 0 ? 1 : 0.45)
+          .onClick(() => this.sendTaildropText())
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-      .backgroundColor(this.groupBackground())
-
-      PhotoPickerComponent({
-        pickerOptions: this.taildropPhotoPickerOptions,
-        pickerController: this.taildropPhotoPickerController,
-        onSelect: (uri: string) => this.selectTaildropPhoto(uri),
-        onDeselect: (uri: string) => this.deselectTaildropPhoto(uri)
-      })
-        .layoutWeight(1)
     }
     .width('100%')
-    .height('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 24 })
     .backgroundColor($r('sys.color.background_secondary'))
   }
 
@@ -5433,11 +5501,14 @@ export struct BridgeStatus {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         if (this.taildropTransfer.state === 'queued' || this.taildropTransfer.state === 'sending') {
-          Button($r('app.string.cancel_action'))
+          Button(this.taildropCancelPending ? $r('app.string.transfer_cancelling') :
+            $r('app.string.cancel_action'))
             .fontSize(12)
             .height(32)
             .backgroundColor(this.secondaryBackground())
             .fontColor($r('sys.color.font_primary'))
+            .enabled(!this.taildropCancelPending)
+            .opacity(this.taildropCancelPending ? 0.6 : 1)
             .onClick(() => this.cancelTaildropSend())
         }
       }
@@ -5677,7 +5748,6 @@ export struct BridgeStatus {
   private TransferContent() {
     Scroll(this.transferScroller) {
       Column({ space: 14 }) {
-        this.TransferOverviewPanel()
         if (this.taildropPreparing || this.taildropTransfer.state === 'queued' ||
           this.taildropTransfer.state === 'sending') {
           this.TaildropActiveSendPanel()
@@ -5685,62 +5755,62 @@ export struct BridgeStatus {
         if (this.taildropReceiveInProgress) {
           this.TaildropActiveReceivePanel()
         }
-        if (this.isConnected() && (this.taildropState === 'ready' || this.taildropState === 'disabled')) {
+        Column({ space: 8 }) {
+          Column({ space: 2 }) {
+            Text($r('app.string.transfer_targets_title'))
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('sys.color.font_primary'))
+              .width('100%')
+            Text($r('app.string.transfer_targets_ready_title', this.taildropOnlineTargetCount()))
+              .fontSize(12)
+              .fontColor($r('sys.color.font_secondary'))
+              .width('100%')
+          }
+          .id('transfer-page-title')
+          .width('100%')
+          .padding({ left: 4, top: 8, bottom: 2 })
+          if (this.displayedTaildropTargets().length > 0) {
+            this.TaildropTargetsPanel()
+          } else {
+            this.TaildropTargetsEmptyPanel()
+          }
+        }
+        .width('100%')
+        .enabled(this.isConnected() && this.taildropState === 'ready')
+        .opacity(this.isConnected() && this.taildropState === 'ready' ? 1 : 0.45)
+        if (this.isConnected() && this.taildropState === 'ready') {
           Column({ space: 8 }) {
-            Column({ space: 2 }) {
-              Text($r('app.string.transfer_targets_title'))
+            Row() {
+              Text($r('app.string.transfer_inbox_title'))
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_primary'))
-                .width('100%')
-              Text($r('app.string.transfer_targets_ready_title', this.taildropOnlineTargetCount()))
+              Blank()
+              Text($r('app.string.transfer_clear_cache_action'))
+                .fontSize(12)
+                .fontColor($r('sys.color.icon_emphasize'))
+                .opacity(this.taildropSendActive() ? 0.45 : 1)
+                .onClick(() => this.confirmClearTaildropInboxCache())
+            }
+            .width('100%')
+            .padding({ left: 4, right: 4, top: 8, bottom: 2 })
+            .alignItems(VerticalAlign.Center)
+            if (this.taildropWaitingFiles.length > 0) {
+              this.TaildropInboxPanel()
+            } else {
+              Text(this.taildropInboxReason.length > 0 ?
+                $r('app.string.transfer_inbox_unavailable') : $r('app.string.transfer_inbox_empty'))
                 .fontSize(12)
                 .fontColor($r('sys.color.font_secondary'))
+                .textAlign(TextAlign.Center)
                 .width('100%')
-            }
-            .id('transfer-page-title')
-            .width('100%')
-            .padding({ left: 4, top: 8, bottom: 2 })
-            if (this.taildropTargets.length > 0) {
-              this.TaildropTargetsPanel()
-            } else {
-              this.TaildropTargetsEmptyPanel()
+                .padding({ left: 20, right: 20, top: 18, bottom: 18 })
+                .backgroundColor(this.groupBackground())
+                .borderRadius(16)
             }
           }
           .width('100%')
-          if (this.taildropState === 'ready') {
-            Column({ space: 8 }) {
-              Row() {
-                Text($r('app.string.transfer_inbox_title'))
-                  .fontSize(15)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor($r('sys.color.font_primary'))
-                Blank()
-                Text($r('app.string.transfer_clear_cache_action'))
-                  .fontSize(12)
-                  .fontColor($r('sys.color.icon_emphasize'))
-                  .opacity(this.taildropSendActive() ? 0.45 : 1)
-                  .onClick(() => this.confirmClearTaildropInboxCache())
-              }
-              .width('100%')
-              .padding({ left: 4, right: 4, top: 8, bottom: 2 })
-              .alignItems(VerticalAlign.Center)
-              if (this.taildropWaitingFiles.length > 0) {
-                this.TaildropInboxPanel()
-              } else {
-                Text(this.taildropInboxReason.length > 0 ?
-                  $r('app.string.transfer_inbox_unavailable') : $r('app.string.transfer_inbox_empty'))
-                  .fontSize(12)
-                  .fontColor($r('sys.color.font_secondary'))
-                  .textAlign(TextAlign.Center)
-                  .width('100%')
-                  .padding({ left: 20, right: 20, top: 18, bottom: 18 })
-                  .backgroundColor(this.groupBackground())
-                  .borderRadius(16)
-              }
-            }
-            .width('100%')
-          }
         }
         Column({ space: 8 }) {
           Row() {
@@ -5860,15 +5930,20 @@ export struct BridgeStatus {
         end: LengthMetrics.vp(this.contentMargin())
       },
       style: {
-        blurStrategy: BlurStrategy.ENABLE,
+        blurStrategy: BlurStrategy.DISABLE,
         thermoCtrl: true,
         scrollEffectOpts: {
-          enableScrollEffect: true,
+          enableScrollEffect: false,
           scrollEffectType: ScrollEffectType.GRADIENT_BLUR,
           blurEffectiveStartOffset: LengthMetrics.vp(0),
           blurEffectiveEndOffset: LengthMetrics.vp(20)
         },
         originalStyle: {
+          backgroundStyle: {
+            backgroundColor: $r('sys.color.background_secondary'),
+            blurRadius: 0,
+            maskExtraHeight: 0
+          },
           contentStyle: {
             titleStyle: {
               mainTitleColor: $r('sys.color.font_primary'),
@@ -5879,8 +5954,8 @@ export struct BridgeStatus {
         scrollEffectStyle: {
           backgroundStyle: {
             backgroundColor: $r('sys.color.background_secondary'),
-            blurRadius: 24,
-            maskExtraHeight: 40.0
+            blurRadius: 0,
+            maskExtraHeight: 0
           },
           contentStyle: {
             titleStyle: {
@@ -5888,10 +5963,6 @@ export struct BridgeStatus {
               subTitleColor: $r('sys.color.font_secondary')
             }
           }
-        },
-        systemMaterialEffect: {
-          materialType: hdsMaterial.MaterialType.ADAPTIVE,
-          materialLevel: this.glowMaterialLevel()
         }
       },
       content: {
@@ -6366,13 +6437,13 @@ export struct BridgeStatus {
     .onAreaChange((_oldValue: Area, newValue: Area) => {
       this.layoutWidth = Number(newValue.width);
     })
-    .bindSheet($$this.taildropPhotoPickerVisible, this.TaildropPhotoPickerSheet(), {
-      height: SheetSize.MEDIUM,
-      detents: [SheetSize.MEDIUM, SheetSize.LARGE],
+    .bindSheet($$this.taildropTextEditorVisible, this.TaildropTextEditorSheet(), {
+      height: 310,
+      detents: [310],
       preferType: SheetType.BOTTOM,
       dragBar: true,
       showClose: true,
-      title: { title: $r('app.string.transfer_photo_picker_title') }
+      title: { title: $r('app.string.transfer_text_editor_title') }
     })
   }
 }

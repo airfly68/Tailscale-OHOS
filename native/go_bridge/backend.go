@@ -206,7 +206,10 @@ type validatedTaildropFile struct {
 	Size int64
 }
 
-const taildropSendMaxAttempts = 3
+const (
+	taildropSendMaxAttempts = 3
+	taildropMaxSendFiles    = 100
+)
 
 type taildropProgressReader struct {
 	reader io.Reader
@@ -842,7 +845,7 @@ func (b *backendController) taildropSend(requestText string) string {
 	b.taildropMu.Unlock()
 
 	lookupCtx, lookupCancel := context.WithTimeout(ctx, 5*time.Second)
-	targetID, targetName, targetIP, lookupErr := resolveTaildropTarget(lookupCtx, client, request.TargetKey)
+	targetID, targetName, lookupErr := resolveTaildropTarget(lookupCtx, client, request.TargetKey)
 	lookupCancel()
 	if lookupErr != nil {
 		return marshalTaildropTransfer(b.finishTaildropTransfer(
@@ -851,11 +854,6 @@ func (b *backendController) taildropSend(requestText string) string {
 	b.updateTaildropTransfer(request.RequestID, func(snapshot *taildropTransferSnapshot) {
 		snapshot.TargetName = targetName
 	})
-	// A PeerAPI HEAD request exercises the same path used by Taildrop and gives
-	// magicsock a chance to establish a direct route before the large PUT starts.
-	// Failure is intentionally non-fatal: the subsequent PUT can still use DERP.
-	warmTaildropPeer(ctx, client, targetIP)
-
 	var completedBytes int64
 	for index, file := range files {
 		if err := ctx.Err(); err != nil {
@@ -869,7 +867,6 @@ func (b *backendController) taildropSend(requestText string) string {
 					pushErr = ctx.Err()
 					break
 				}
-				warmTaildropPeer(ctx, client, targetIP)
 			}
 
 			handle, openErr := os.Open(file.Path)
@@ -1096,7 +1093,7 @@ func stageTaildropWaitingFile(reader io.Reader, size int64, rootPath, destinatio
 
 func validateTaildropSendRequest(request taildropSendRequest) ([]validatedTaildropFile, int64, error) {
 	if request.RequestID <= 0 || !validPeerKey(request.TargetKey) ||
-		len(request.Files) == 0 || len(request.Files) > 10 || !filepath.IsAbs(request.OutboxRoot) {
+		len(request.Files) == 0 || len(request.Files) > taildropMaxSendFiles || !filepath.IsAbs(request.OutboxRoot) {
 		return nil, 0, errors.New("invalid request metadata")
 	}
 	root, err := filepath.EvalSymlinks(filepath.Clean(request.OutboxRoot))
@@ -1149,10 +1146,10 @@ func validPeerKey(key string) bool {
 
 func resolveTaildropTarget(
 	ctx context.Context, client *local.Client, targetKey string,
-) (tailcfg.StableNodeID, string, netip.Addr, error) {
+) (tailcfg.StableNodeID, string, error) {
 	targets, err := client.FileTargets(ctx)
 	if err != nil {
-		return "", "", netip.Addr{}, err
+		return "", "", err
 	}
 	for _, target := range targets {
 		if target.Node == nil || target.Node.StableID.IsZero() || peerStableKey(target.Node.StableID) != targetKey {
@@ -1162,41 +1159,9 @@ func resolveTaildropTarget(
 		if name == "" {
 			name = strings.TrimSuffix(target.Node.Name, ".")
 		}
-		var targetIP netip.Addr
-		for _, prefix := range target.Node.Addresses {
-			if address := prefix.Addr(); address.IsValid() {
-				targetIP = address
-				if address.Is4() {
-					break
-				}
-			}
-		}
-		return target.Node.StableID, name, targetIP, nil
+		return target.Node.StableID, name, nil
 	}
-	return "", "", netip.Addr{}, errors.New("target not found")
-}
-
-func warmTaildropPeer(ctx context.Context, client *local.Client, targetIP netip.Addr) {
-	if client == nil || !targetIP.IsValid() || ctx.Err() != nil {
-		return
-	}
-	// A disco ping is the path-discovery primitive used by `tailscale ping`.
-	// Repeat briefly so a LAN endpoint learned through DERP can be selected
-	// before the PeerAPI TCP connection is opened.
-	for attempt := 0; attempt < 3 && ctx.Err() == nil; attempt++ {
-		discoCtx, discoCancel := context.WithTimeout(ctx, 3*time.Second)
-		result, _ := client.Ping(discoCtx, targetIP, tailcfg.PingDisco)
-		discoCancel()
-		if result != nil && result.Err == "" && (result.Endpoint != "" || result.PeerRelay != "") {
-			break
-		}
-		if !waitForTaildropRetry(ctx, 250*time.Millisecond) {
-			return
-		}
-	}
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	client.Ping(pingCtx, targetIP, tailcfg.PingPeerAPI)
+	return "", "", errors.New("target not found")
 }
 
 func waitForTaildropRetry(ctx context.Context, delay time.Duration) bool {
@@ -2121,17 +2086,19 @@ func (b *backendController) formatRunningStatus(
 		}
 	}
 	var tunRead, tunWritten, txBytes, rxBytes, trafficSession uint64
+	var tunReadErrors, tunWriteErrors uint64
 	var dnsQueries, dnsResponses, dnsAnswers uint64
 	var magicArmed bool
 	var magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn uint64
 	if tunDevice != nil {
 		tunRead, tunWritten = tunDevice.packetCounts()
 		txBytes, rxBytes, trafficSession = tunDevice.trafficCounts()
+		tunReadErrors, tunWriteErrors = tunDevice.errorCounts()
 		dnsQueries, dnsResponses, dnsAnswers = tunDevice.dnsCounts()
 		magicArmed, magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn = tunDevice.magicDNSCounts()
 	}
 	return fmt.Sprintf(
-		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | corpDNS=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | magicDNSState=%s | magicArmed=%t | magicQ=%d | magicR=%d | magicA=%d | magicOut=%d | magicIn=%d | netUp=unknown | phase=%s",
+		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | corpDNS=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | tunReadErrors=%d | tunWriteErrors=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | magicDNSState=%s | magicArmed=%t | magicQ=%d | magicR=%d | magicA=%d | magicOut=%d | magicIn=%d | netUp=unknown | phase=%s",
 		status.BackendState,
 		status.AuthURL != "",
 		len(status.TailscaleIPs),
@@ -2143,6 +2110,8 @@ func (b *backendController) formatRunningStatus(
 		subnetRoutes,
 		tunRead,
 		tunWritten,
+		tunReadErrors,
+		tunWriteErrors,
 		trafficSession,
 		txBytes,
 		rxBytes,
@@ -2163,14 +2132,19 @@ func (b *backendController) formatRunningStatus(
 func (b *backendController) authURL() string {
 	b.mu.Lock()
 	client := b.client
+	starting := b.starting
+	serverPresent := b.server != nil
 	b.mu.Unlock()
 	if client == nil {
+		if starting || serverPresent {
+			return "PENDING | login URL | backend starting"
+		}
 		return "FAILED | login URL | backend not ready"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	status, err := client.StatusWithoutPeers(ctx)
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	status, err := client.StatusWithoutPeers(statusCtx)
+	statusCancel()
 	if err != nil {
 		return "FAILED | login URL | status unavailable"
 	}
@@ -2178,7 +2152,10 @@ func (b *backendController) authURL() string {
 		// Logout clears the previous authorization URL. Explicitly start a new
 		// interactive flow; the control plane publishes the new URL
 		// asynchronously, so the ArkUI side polls this bounded PENDING state.
-		if err := client.StartLoginInteractive(ctx); err != nil {
+		loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := client.StartLoginInteractive(loginCtx)
+		loginCancel()
+		if err != nil {
 			return "FAILED | login URL | interactive login request"
 		}
 		return "PENDING | login URL | requested"

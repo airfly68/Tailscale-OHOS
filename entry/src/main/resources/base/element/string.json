@@ -110,19 +110,27 @@
     },
     {
       "name": "transfer_photo_action",
-      "value": "Photos"
+      "value": "Media"
     },
     {
-      "name": "transfer_photo_picker_title",
-      "value": "Choose photos"
+      "name": "transfer_text_action",
+      "value": "Text"
     },
     {
-      "name": "transfer_photo_picker_count",
-      "value": "%d of %d selected"
+      "name": "transfer_text_editor_title",
+      "value": "Send text"
+    },
+    {
+      "name": "transfer_text_placeholder",
+      "value": "Enter the text to send"
     },
     {
       "name": "transfer_cancel_failed",
       "value": "Could not cancel the transfer."
+    },
+    {
+      "name": "transfer_cancelling",
+      "value": "Cancelling"
     },
     {
       "name": "transfer_send_cancelled",
@@ -271,6 +279,10 @@
     {
       "name": "transfer_retry_action",
       "value": "Retry"
+    },
+    {
+      "name": "transfer_retry_choose_content",
+      "value": "Choose the content to resend."
     },
     {
       "name": "transfer_sent_status",
