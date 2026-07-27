@@ -2086,17 +2086,19 @@ func (b *backendController) formatRunningStatus(
 		}
 	}
 	var tunRead, tunWritten, txBytes, rxBytes, trafficSession uint64
+	var tunReadErrors, tunWriteErrors uint64
 	var dnsQueries, dnsResponses, dnsAnswers uint64
 	var magicArmed bool
 	var magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn uint64
 	if tunDevice != nil {
 		tunRead, tunWritten = tunDevice.packetCounts()
 		txBytes, rxBytes, trafficSession = tunDevice.trafficCounts()
+		tunReadErrors, tunWriteErrors = tunDevice.errorCounts()
 		dnsQueries, dnsResponses, dnsAnswers = tunDevice.dnsCounts()
 		magicArmed, magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn = tunDevice.magicDNSCounts()
 	}
 	return fmt.Sprintf(
-		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | corpDNS=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | magicDNSState=%s | magicArmed=%t | magicQ=%d | magicR=%d | magicA=%d | magicOut=%d | magicIn=%d | netUp=unknown | phase=%s",
+		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | corpDNS=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | tunReadErrors=%d | tunWriteErrors=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | magicDNSState=%s | magicArmed=%t | magicQ=%d | magicR=%d | magicA=%d | magicOut=%d | magicIn=%d | netUp=unknown | phase=%s",
 		status.BackendState,
 		status.AuthURL != "",
 		len(status.TailscaleIPs),
@@ -2108,6 +2110,8 @@ func (b *backendController) formatRunningStatus(
 		subnetRoutes,
 		tunRead,
 		tunWritten,
+		tunReadErrors,
+		tunWriteErrors,
 		trafficSession,
 		txBytes,
 		rxBytes,

@@ -26,6 +26,8 @@ type harmonyTunDevice struct {
 	writeCount         atomic.Uint64
 	readByteCount      atomic.Uint64
 	writeByteCount     atomic.Uint64
+	readErrorCount     atomic.Uint64
+	writeErrorCount    atomic.Uint64
 	trafficSession     uint64
 	dnsQueryCount      atomic.Uint64
 	dnsResponseCount   atomic.Uint64
@@ -78,6 +80,9 @@ func (d *harmonyTunDevice) Read(bufs [][]byte, sizes []int, offset int) (int, er
 		d.observeDNSPacket(bufs[0][offset:offset+n], true)
 		return 1, nil
 	}
+	if err != nil && !isRetriableTunError(err) {
+		d.readErrorCount.Add(1)
+	}
 	return 0, err
 }
 
@@ -89,6 +94,9 @@ func (d *harmonyTunDevice) Write(bufs [][]byte, offset int) (int, error) {
 		}
 		n, err := d.file.Write(buf[offset:])
 		if err != nil {
+			if !isRetriableTunError(err) {
+				d.writeErrorCount.Add(1)
+			}
 			return written, err
 		}
 		if n > 0 {
@@ -127,6 +135,16 @@ func (d *harmonyTunDevice) packetCounts() (read uint64, written uint64) {
 // the TUN is device upload; writing decrypted packets back is device download.
 func (d *harmonyTunDevice) trafficCounts() (txBytes uint64, rxBytes uint64, session uint64) {
 	return d.readByteCount.Load(), d.writeByteCount.Load(), d.trafficSession
+}
+
+func (d *harmonyTunDevice) errorCounts() (readErrors uint64, writeErrors uint64) {
+	return d.readErrorCount.Load(), d.writeErrorCount.Load()
+}
+
+func isRetriableTunError(err error) bool {
+	return errors.Is(err, unix.EAGAIN) ||
+		errors.Is(err, unix.EWOULDBLOCK) ||
+		errors.Is(err, unix.EINTR)
 }
 
 func (d *harmonyTunDevice) dnsCounts() (queries uint64, responses uint64, answers uint64) {

@@ -388,7 +388,16 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   }
 
   private writeVpnConfigSummary(config: vpnExtension.VpnConfig): void {
+    const addresses: vpnExtension.LinkAddress[] = config.addresses ?? [];
     const routes: vpnExtension.RouteInfo[] = config.routes ?? [];
+    const hasIPv4Address: boolean = addresses.some((address: vpnExtension.LinkAddress) =>
+      address.address.family === 1);
+    const hasIPv6Address: boolean = addresses.some((address: vpnExtension.LinkAddress) =>
+      address.address.family === 2);
+    const hasTailnetIPv4: boolean = routes.some((route: vpnExtension.RouteInfo) =>
+      route.destination.address.address === '100.64.0.0' && route.destination.prefixLength === 10);
+    const hasTailnetIPv6: boolean = routes.some((route: vpnExtension.RouteInfo) =>
+      route.destination.address.address === 'fd7a:115c:a1e0::' && route.destination.prefixLength === 48);
     const hasDefaultIPv4: boolean = routes.some((route: vpnExtension.RouteInfo) =>
       route.destination.address.address === '0.0.0.0' && route.destination.prefixLength === 0 &&
       route.isDefaultRoute);
@@ -396,7 +405,12 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       route.destination.address.address === '::' && route.destination.prefixLength === 0 &&
       route.isDefaultRoute);
     this.writeTextFile(`${this.context.filesDir}/${VPN_CONFIG_SUMMARY_FILE_NAME}`,
-      `routes=${routes.length} | defaultIPv4=${hasDefaultIPv4} | defaultIPv6=${hasDefaultIPv6}`);
+      `addressCount=${addresses.length} | routeCount=${routes.length} | ` +
+      `hasIPv4Address=${hasIPv4Address} | hasIPv6Address=${hasIPv6Address} | ` +
+      `hasTailnetIPv4=${hasTailnetIPv4} | hasTailnetIPv6=${hasTailnetIPv6} | ` +
+      `hasDefaultIPv4=${hasDefaultIPv4} | hasDefaultIPv6=${hasDefaultIPv6} | ` +
+      `ipv4Accepted=${config.isIPv4Accepted} | ipv6Accepted=${config.isIPv6Accepted} | ` +
+      `mtu=${config.mtu}`);
   }
 
   private vpnReplaceApprovalFilePath(): string {
