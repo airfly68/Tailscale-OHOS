@@ -48,6 +48,9 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO"
       }
     ]
   }

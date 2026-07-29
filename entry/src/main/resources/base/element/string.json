@@ -370,7 +370,7 @@
     },
     {
       "name": "transfer_taildrop_title",
-      "value": "Meshsend"
+      "value": "MeshSend"
     },
     {
       "name": "transfer_taildrop_description",
@@ -653,16 +653,8 @@
       "value": "Peer connectivity testing is temporarily unavailable."
     },
     {
-      "name": "peer_copy_dns",
-      "value": "Copy DNS"
-    },
-    {
       "name": "peer_copy_ip",
       "value": "Copy IP"
-    },
-    {
-      "name": "peer_dns_copied",
-      "value": "DNS name copied"
     },
     {
       "name": "peer_ip_copied",
@@ -835,14 +827,6 @@
     {
       "name": "setting_subnet_routes_description",
       "value": "Reach networks shared by other devices"
-    },
-    {
-      "name": "setting_magicdns",
-      "value": "Tailscale DNS (MagicDNS)"
-    },
-    {
-      "name": "setting_magicdns_description",
-      "value": "Use device names on your Tailscale network"
     },
     {
       "name": "setting_exit_node",

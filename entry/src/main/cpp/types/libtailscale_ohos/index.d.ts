@@ -25,13 +25,12 @@ export const backendSetExitNodeAsync: (id: string) => Promise<string>;
 export const backendPeerProbe: () => string;
 export const backendPeerProbeAsync: () => Promise<string>;
 export const backendPeerConnectivityAsync: (peerKey: string) => Promise<string>;
+export const backendSunshineProbeAsync: (peerKey: string) => Promise<string>;
+export const backendMediaServiceProbeAsync: (peerKey: string) => Promise<string>;
+export const mediaProbeSelfTestAsync: () => Promise<string>;
 export const backendTaildropSendAsync: (request: string) => Promise<string>;
 export const backendTaildropCancelAsync: () => Promise<string>;
 export const backendTaildropReceiveAsync: (request: string) => Promise<string>;
-export const backendMagicDNSProbeURL: () => string;
-export const backendMagicDNSProbeURLAsync: () => Promise<string>;
-export const backendArmMagicDNSProbe: () => string;
-export const backendArmMagicDNSProbeAsync: () => Promise<string>;
 export const backendRestartWithTun: (stateDir: string, deviceModel: string,
   controlURL: string, fd: number) => string;
 export const controlProbe: () => string;

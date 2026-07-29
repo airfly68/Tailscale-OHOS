@@ -159,6 +159,27 @@ func TSBackendPeerConnectivity(peerKey *C.char) *C.char {
 	return C.CString(harmonyBackend.peerConnectivity(C.GoString(peerKey)))
 }
 
+//export TSBackendSunshineProbe
+func TSBackendSunshineProbe(peerKey *C.char) *C.char {
+	if peerKey == nil {
+		return C.CString(`{"state":"error","checkedAt":0,"errorMessage":"missing_peer"}`)
+	}
+	return C.CString(harmonyBackend.sunshineProbe(C.GoString(peerKey)))
+}
+
+//export TSBackendMediaServiceProbe
+func TSBackendMediaServiceProbe(peerKey *C.char) *C.char {
+	if peerKey == nil {
+		return C.CString(`{"state":"error","checkedAt":0,"services":[],"errorMessage":"missing_peer"}`)
+	}
+	return C.CString(harmonyBackend.mediaServiceProbe(C.GoString(peerKey)))
+}
+
+//export TSMediaProbeSelfTest
+func TSMediaProbeSelfTest() *C.char {
+	return C.CString(mediaProbeSelfTest())
+}
+
 //export TSBackendTaildropSend
 func TSBackendTaildropSend(request *C.char) *C.char {
 	if request == nil {
@@ -178,16 +199,6 @@ func TSBackendTaildropReceive(request *C.char) *C.char {
 		return C.CString(`{"state":"failed","reason":"invalid_request"}`)
 	}
 	return C.CString(harmonyBackend.taildropReceive(C.GoString(request)))
-}
-
-//export TSBackendMagicDNSProbeURL
-func TSBackendMagicDNSProbeURL() *C.char {
-	return C.CString(harmonyBackend.magicDNSProbeURL())
-}
-
-//export TSBackendArmMagicDNSProbe
-func TSBackendArmMagicDNSProbe() *C.char {
-	return C.CString(harmonyBackend.armMagicDNSProbe())
 }
 
 //export TSBackendRestartWithTun

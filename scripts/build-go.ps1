@@ -13,7 +13,8 @@ function Test-GitPatchApplied {
   $previousErrorActionPreference = $ErrorActionPreference
   try {
     $ErrorActionPreference = 'Continue'
-    & git -c "safe.directory=$SafeRepository" -C $Repository apply --reverse --check $Patch 2>$null
+    & git -c "safe.directory=$SafeRepository" -C $Repository apply --reverse --check `
+      --ignore-space-change --ignore-whitespace $Patch 2>$null
     return $LASTEXITCODE -eq 0
   } finally {
     $ErrorActionPreference = $previousErrorActionPreference

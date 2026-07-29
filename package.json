@@ -1,6 +1,6 @@
 {
   "name": "tailscale-ohos",
-  "version": "0.8.41",
+  "version": "0.9.0",
   "ohos": {
     "org": "tailscaleohos",
     "buildTool": "hvigor",

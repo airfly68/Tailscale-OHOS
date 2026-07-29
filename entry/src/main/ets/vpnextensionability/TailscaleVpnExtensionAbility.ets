@@ -17,6 +17,10 @@ const VPN_REPLACE_APPROVAL_FILE_NAME: string = 'vpn-replace-approved';
 const VPN_REPLACE_APPROVAL_TTL_MS: number = 10000;
 const PEER_CONNECTIVITY_REQUEST_FILE_NAME: string = 'peer-connectivity-request.json';
 const PEER_CONNECTIVITY_RESPONSE_FILE_NAME: string = 'peer-connectivity-response.json';
+const SUNSHINE_PROBE_REQUEST_FILE_NAME: string = 'sunshine-probe-request.json';
+const SUNSHINE_PROBE_RESPONSE_FILE_NAME: string = 'sunshine-probe-response.json';
+const MEDIA_SERVICE_PROBE_REQUEST_FILE_NAME: string = 'media-service-probe-request.json';
+const MEDIA_SERVICE_PROBE_RESPONSE_FILE_NAME: string = 'media-service-probe-response.json';
 const TAILDROP_OUTBOX_DIR_NAME: string = 'taildrop-outbox';
 const TAILDROP_SEND_REQUEST_FILE_NAME: string = 'taildrop-send-request.json';
 const TAILDROP_TARGETS_FILE_NAME: string = 'taildrop-targets.json';
@@ -159,6 +163,26 @@ interface PeerConnectivityResponse {
   result: string;
 }
 
+interface SunshineProbeRequest {
+  requestId: number;
+  peerKey: string;
+}
+
+interface SunshineProbeResponse {
+  requestId: number;
+  result: string;
+}
+
+interface MediaServiceProbeRequest {
+  requestId: number;
+  peerKey: string;
+}
+
+interface MediaServiceProbeResponse {
+  requestId: number;
+  result: string;
+}
+
 function emptyTaildropTransfer(): TaildropTransferSummary {
   return {
     requestId: 0, state: 'idle', reason: '', targetKey: '', targetName: '', fileName: '',
@@ -175,6 +199,8 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private statusUpdateInFlight: boolean = false;
   private backendStopWatcher?: fileIo.Watcher;
   private peerConnectivityInFlight: boolean = false;
+  private sunshineProbeInFlight: boolean = false;
+  private mediaServiceProbeInFlight: boolean = false;
   private taildropSendInFlight: boolean = false;
   private taildropCancelInFlight: boolean = false;
   private taildropReceiveInFlight: boolean = false;
@@ -313,14 +339,15 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
             });
           }
         }
-        const useTailscaleDNS: boolean = configParts.length >= 4 && configParts[3] === 'true';
         config = {
           addresses: addresses,
           routes: routes,
-          dnsAddresses: useTailscaleDNS ? ['100.100.100.100'] : [],
+          dnsAddresses: [],
+          searchDomains: [],
           mtu: 1280,
           isIPv4Accepted: true,
           isIPv6Accepted: configParts[1].length > 0,
+          isInternal: true,
           isBlocking: false,
           blockedApplications: [BUNDLE_NAME]
         };
@@ -356,7 +383,6 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
         this.writeStatus(finalStatus);
         if (finalStatus.includes('state=Running')) {
           this.recordDiagnosticEvent('vpn_connected', 'backend');
-          await nativeBridge.backendArmMagicDNSProbeAsync();
           this.writePeerStatus(await nativeBridge.backendPeerProbeAsync());
           this.startStatusUpdates();
         }
@@ -557,6 +583,11 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
           this.writePeerSnapshot(snapshot.peers);
           this.writeTaildropSnapshot(snapshot.taildrop);
           this.processPeerConnectivityRequest();
+          this.processSunshineProbeRequest();
+          this.processMediaServiceProbeRequest();
+          this.processTaildropSendRequest();
+          this.processTaildropCancelRequest();
+          this.processTaildropReceiveRequest();
         })
         .catch(() => {
           if (this.destroying) {
@@ -747,6 +778,111 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
         });
     } catch (_error) {
       this.writeTextFile(requestPath, '');
+    }
+  }
+
+  private sunshineProbeRequestPath(): string {
+    return `${this.context.filesDir}/${SUNSHINE_PROBE_REQUEST_FILE_NAME}`;
+  }
+
+  private sunshineProbeResponsePath(): string {
+    return `${this.context.filesDir}/${SUNSHINE_PROBE_RESPONSE_FILE_NAME}`;
+  }
+
+  private processSunshineProbeRequest(): void {
+    if (this.sunshineProbeInFlight) {
+      return;
+    }
+    const requestPath: string = this.sunshineProbeRequestPath();
+    try {
+      if (!fileIo.accessSync(requestPath)) {
+        return;
+      }
+      const requestText: string = fileIo.readTextSync(requestPath).trim();
+      if (requestText.length === 0) {
+        return;
+      }
+      this.writeTextFile(requestPath, '');
+      const request: SunshineProbeRequest = JSON.parse(requestText) as SunshineProbeRequest;
+      if (request.requestId <= 0 || !/^peer-[a-f0-9]{16}$/.test(request.peerKey)) {
+        return;
+      }
+      this.sunshineProbeInFlight = true;
+      nativeBridge.backendSunshineProbeAsync(request.peerKey)
+        .then((result: string) => {
+          const response: SunshineProbeResponse = { requestId: request.requestId, result: result };
+          this.writeTextFile(this.sunshineProbeResponsePath(), JSON.stringify(response));
+        })
+        .catch(() => {
+          const response: SunshineProbeResponse = {
+            requestId: request.requestId,
+            result: '{"state":"error","checkedAt":0,"errorMessage":"extension_error"}'
+          };
+          this.writeTextFile(this.sunshineProbeResponsePath(), JSON.stringify(response));
+        })
+        .finally(() => {
+          this.sunshineProbeInFlight = false;
+        });
+    } catch (_error) {
+      this.writeTextFile(requestPath, '');
+    }
+  }
+
+  private mediaServiceProbeRequestPath(): string {
+    return `${this.context.filesDir}/${MEDIA_SERVICE_PROBE_REQUEST_FILE_NAME}`;
+  }
+
+  private mediaServiceProbeResponsePath(): string {
+    return `${this.context.filesDir}/${MEDIA_SERVICE_PROBE_RESPONSE_FILE_NAME}`;
+  }
+
+  private processMediaServiceProbeRequest(): void {
+    if (this.mediaServiceProbeInFlight) {
+      return;
+    }
+    const requestPath: string = this.mediaServiceProbeRequestPath();
+    try {
+      if (!fileIo.accessSync(requestPath)) {
+        return;
+      }
+      const requestText: string = fileIo.readTextSync(requestPath).trim();
+      if (requestText.length === 0) {
+        return;
+      }
+      this.writeTextFile(requestPath, '');
+      const request: MediaServiceProbeRequest = JSON.parse(requestText) as MediaServiceProbeRequest;
+      if (request.requestId <= 0 || !/^peer-[a-f0-9]{16}$/.test(request.peerKey)) {
+        this.recordDiagnosticEvent('media_probe_rejected', 'invalid_request');
+        return;
+      }
+      this.mediaServiceProbeInFlight = true;
+      this.recordDiagnosticEvent('media_probe_started', 'requested');
+      hilog.info(DOMAIN, TAG, 'Media service probe started');
+      nativeBridge.backendMediaServiceProbeAsync(request.peerKey)
+        .then((result: string) => {
+          const response: MediaServiceProbeResponse = { requestId: request.requestId, result: result };
+          this.writeTextFile(this.mediaServiceProbeResponsePath(), JSON.stringify(response));
+          const available: boolean = result.includes('"state":"available"');
+          this.recordDiagnosticEvent(available ? 'media_probe_available' : 'media_probe_completed',
+            available ? 'service_confirmed' : 'no_service');
+          hilog.info(DOMAIN, TAG, 'Media service probe completed. available=%{public}s',
+            available ? 'true' : 'false');
+        })
+        .catch(() => {
+          const response: MediaServiceProbeResponse = {
+            requestId: request.requestId,
+            result: '{"state":"error","checkedAt":0,"services":[],"errorMessage":"extension_error"}'
+          };
+          this.writeTextFile(this.mediaServiceProbeResponsePath(), JSON.stringify(response));
+          this.recordDiagnosticEvent('media_probe_failed', 'extension');
+          hilog.error(DOMAIN, TAG, 'Media service probe failed');
+        })
+        .finally(() => {
+          this.mediaServiceProbeInFlight = false;
+        });
+    } catch (_error) {
+      this.writeTextFile(requestPath, '');
+      this.recordDiagnosticEvent('media_probe_failed', 'request_parse');
     }
   }
 

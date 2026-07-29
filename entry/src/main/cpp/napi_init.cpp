@@ -20,6 +20,8 @@ enum class AsyncInputOperation {
     SetExitNode,
     SetNetworkSetting,
     PeerConnectivity,
+    SunshineProbe,
+    MediaServiceProbe,
     TaildropSend,
     TaildropReceive
 };
@@ -101,6 +103,10 @@ void ExecuteAsyncInput(napi_env env, void* data)
         message = TSBackendSetNetworkSetting(const_cast<char*>(work->input.c_str()), work->enabled ? 1 : 0);
     } else if (work->operation == AsyncInputOperation::PeerConnectivity) {
         message = TSBackendPeerConnectivity(const_cast<char*>(work->input.c_str()));
+    } else if (work->operation == AsyncInputOperation::SunshineProbe) {
+        message = TSBackendSunshineProbe(const_cast<char*>(work->input.c_str()));
+    } else if (work->operation == AsyncInputOperation::MediaServiceProbe) {
+        message = TSBackendMediaServiceProbe(const_cast<char*>(work->input.c_str()));
     } else if (work->operation == AsyncInputOperation::TaildropSend) {
         message = TSBackendTaildropSend(const_cast<char*>(work->input.c_str()));
     } else {
@@ -228,6 +234,50 @@ napi_value BackendPeerConnectivityAsync(napi_env env, napi_callback_info info)
         env, AsyncInputOperation::PeerConnectivity, key.data(), false, "TailscaleBackendPeerConnectivity");
 }
 
+napi_value BackendSunshineProbeAsync(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 1) {
+        napi_throw_type_error(env, nullptr, "backendSunshineProbeAsync requires one peer key");
+        return nullptr;
+    }
+    size_t length = 0;
+    if (napi_get_value_string_utf8(env, args[0], nullptr, 0, &length) != napi_ok) {
+        napi_throw_type_error(env, nullptr, "Peer key must be a string");
+        return nullptr;
+    }
+    std::vector<char> key(length + 1, '\0');
+    if (napi_get_value_string_utf8(env, args[0], key.data(), key.size(), &length) != napi_ok) {
+        napi_throw_error(env, nullptr, "Failed to read the peer key");
+        return nullptr;
+    }
+    return CreateAsyncInputPromise(
+        env, AsyncInputOperation::SunshineProbe, key.data(), false, "TailscaleBackendSunshineProbe");
+}
+
+napi_value BackendMediaServiceProbeAsync(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    if (napi_get_cb_info(env, info, &argc, args, nullptr, nullptr) != napi_ok || argc != 1) {
+        napi_throw_type_error(env, nullptr, "backendMediaServiceProbeAsync requires one peer key");
+        return nullptr;
+    }
+    size_t length = 0;
+    if (napi_get_value_string_utf8(env, args[0], nullptr, 0, &length) != napi_ok) {
+        napi_throw_type_error(env, nullptr, "Peer key must be a string");
+        return nullptr;
+    }
+    std::vector<char> key(length + 1, '\0');
+    if (napi_get_value_string_utf8(env, args[0], key.data(), key.size(), &length) != napi_ok) {
+        napi_throw_error(env, nullptr, "Failed to read the peer key");
+        return nullptr;
+    }
+    return CreateAsyncInputPromise(
+        env, AsyncInputOperation::MediaServiceProbe, key.data(), false, "TailscaleBackendMediaServiceProbe");
+}
+
 napi_value BackendTaildropSendAsync(napi_env env, napi_callback_info info)
 {
     size_t argc = 1;
@@ -308,12 +358,6 @@ napi_value BackendVpnConfigAsync(napi_env env, napi_callback_info info)
     return CreateAsyncStringPromise(env, TSBackendVPNConfig, "TailscaleBackendVpnConfig");
 }
 
-napi_value BackendMagicDNSProbeURLAsync(napi_env env, napi_callback_info info)
-{
-    (void)info;
-    return CreateAsyncStringPromise(env, TSBackendMagicDNSProbeURL, "TailscaleBackendMagicDNSProbeURL");
-}
-
 napi_value ProbeEngineAsync(napi_env env, napi_callback_info info)
 {
     (void)info;
@@ -326,10 +370,10 @@ napi_value BackendPeerProbeAsync(napi_env env, napi_callback_info info)
     return CreateAsyncStringPromise(env, TSBackendPeerProbe, "TailscaleBackendPeerProbe");
 }
 
-napi_value BackendArmMagicDNSProbeAsync(napi_env env, napi_callback_info info)
+napi_value BackendMediaProbeSelfTestAsync(napi_env env, napi_callback_info info)
 {
     (void)info;
-    return CreateAsyncStringPromise(env, TSBackendArmMagicDNSProbe, "TailscaleBackendArmMagicDNSProbe");
+    return CreateAsyncStringPromise(env, TSMediaProbeSelfTest, "MeshArcMediaProbeSelfTest");
 }
 
 napi_value Hello(napi_env env, napi_callback_info info)
@@ -705,42 +749,6 @@ napi_value BackendPeerProbe(napi_env env, napi_callback_info info)
     return result;
 }
 
-napi_value BackendMagicDNSProbeURL(napi_env env, napi_callback_info info)
-{
-    (void)info;
-    char* message = TSBackendMagicDNSProbeURL();
-    if (message == nullptr) {
-        napi_throw_error(env, nullptr, "MagicDNS probe target is unavailable");
-        return nullptr;
-    }
-    napi_value result = nullptr;
-    napi_status status = napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &result);
-    TSFreeString(message);
-    if (status != napi_ok) {
-        napi_throw_error(env, nullptr, "Failed to transfer the MagicDNS probe target");
-        return nullptr;
-    }
-    return result;
-}
-
-napi_value BackendArmMagicDNSProbe(napi_env env, napi_callback_info info)
-{
-    (void)info;
-    char* message = TSBackendArmMagicDNSProbe();
-    if (message == nullptr) {
-        napi_throw_error(env, nullptr, "MagicDNS probe arming returned a null status");
-        return nullptr;
-    }
-    napi_value result = nullptr;
-    napi_status status = napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &result);
-    TSFreeString(message);
-    if (status != napi_ok) {
-        napi_throw_error(env, nullptr, "Failed to create MagicDNS arming status");
-        return nullptr;
-    }
-    return result;
-}
-
 napi_value BackendRestartWithTun(napi_env env, napi_callback_info info)
 {
     size_t argc = 4;
@@ -880,17 +888,17 @@ static napi_value Init(napi_env env, napi_value exports)
         {"backendPeerProbeAsync", nullptr, BackendPeerProbeAsync, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"backendPeerConnectivityAsync", nullptr, BackendPeerConnectivityAsync, nullptr, nullptr, nullptr,
             napi_default, nullptr},
+        {"backendSunshineProbeAsync", nullptr, BackendSunshineProbeAsync, nullptr, nullptr, nullptr,
+            napi_default, nullptr},
+        {"backendMediaServiceProbeAsync", nullptr, BackendMediaServiceProbeAsync, nullptr, nullptr, nullptr,
+            napi_default, nullptr},
+        {"mediaProbeSelfTestAsync", nullptr, BackendMediaProbeSelfTestAsync, nullptr, nullptr, nullptr,
+            napi_default, nullptr},
         {"backendTaildropSendAsync", nullptr, BackendTaildropSendAsync, nullptr, nullptr, nullptr,
             napi_default, nullptr},
         {"backendTaildropCancelAsync", nullptr, BackendTaildropCancelAsync, nullptr, nullptr, nullptr,
             napi_default, nullptr},
         {"backendTaildropReceiveAsync", nullptr, BackendTaildropReceiveAsync, nullptr, nullptr, nullptr,
-            napi_default, nullptr},
-        {"backendMagicDNSProbeURL", nullptr, BackendMagicDNSProbeURL, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"backendMagicDNSProbeURLAsync", nullptr, BackendMagicDNSProbeURLAsync, nullptr, nullptr, nullptr,
-            napi_default, nullptr},
-        {"backendArmMagicDNSProbe", nullptr, BackendArmMagicDNSProbe, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"backendArmMagicDNSProbeAsync", nullptr, BackendArmMagicDNSProbeAsync, nullptr, nullptr, nullptr,
             napi_default, nullptr},
         {"backendRestartWithTun", nullptr, BackendRestartWithTun, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"controlProbe", nullptr, ControlProbe, nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -147,3 +147,39 @@ func TestHarmonyHostnameFallback(t *testing.T) {
 		t.Fatalf("harmonyHostname did not sanitize model: %q", got)
 	}
 }
+
+func TestMediaServiceResponseClassification(t *testing.T) {
+	jellyfin, ok := classifySystemMediaResponse(
+		[]byte(`{"ServerName":"Home NAS","Version":"10.10.7","ProductName":"Jellyfin Server","Id":"one"}`),
+		"http://100.64.0.10:8096", "/System/Info/Public")
+	if !ok || jellyfin.Type != "jellyfin" || jellyfin.Name != "Home NAS" {
+		t.Fatalf("Jellyfin fixture not classified: %#v, ok=%v", jellyfin, ok)
+	}
+	emby, ok := classifySystemMediaResponse(
+		[]byte(`{"ServerName":"Media","Version":"4.8.11","ProductName":"Emby Server","Id":"two"}`),
+		"http://100.64.0.10:8096", "/emby/System/Info/Public")
+	if !ok || emby.Type != "emby" || emby.URL != "http://100.64.0.10:8096/emby" {
+		t.Fatalf("Emby fixture not classified: %#v, ok=%v", emby, ok)
+	}
+	if _, ok := classifySystemMediaResponse(
+		[]byte(`{"ServerName":"Other","Version":"1","ProductName":"Generic HTTP"}`),
+		"http://100.64.0.10:8096", "/System/Info/Public"); ok {
+		t.Fatal("generic HTTP response was accepted as a media server")
+	}
+	plex, ok := classifyPlexIdentity(
+		[]byte(`<MediaContainer size="0" machineIdentifier="fixture" version="1.41.4.9463"/>`),
+		"http://100.64.0.10:32400")
+	if !ok || plex.Type != "plex" {
+		t.Fatalf("Plex fixture not classified: %#v, ok=%v", plex, ok)
+	}
+	if _, ok := classifyPlexIdentity([]byte(`<html>Plex</html>`),
+		"http://100.64.0.10:32400"); ok {
+		t.Fatal("non-identity XML was accepted as Plex")
+	}
+}
+
+func TestMediaProbeSelfTest(t *testing.T) {
+	if result := mediaProbeSelfTest(); !strings.Contains(result, `"state":"passed"`) {
+		t.Fatalf("media probe self-test failed: %s", result)
+	}
+}

@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
@@ -17,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tailscale.com/client/local"
@@ -84,6 +89,52 @@ type peerConnectivityResult struct {
 	MinLatencyMS int    `json:"minLatencyMs"`
 	AvgLatencyMS int    `json:"avgLatencyMs"`
 	MaxLatencyMS int    `json:"maxLatencyMs"`
+	PathType     string `json:"pathType"`
+	LatencyMS    int    `json:"latencyMs"`
+	RelayRegion  string `json:"relayRegion"`
+}
+
+type sunshineProbeResult struct {
+	State         string `json:"state"`
+	CheckedAt     int64  `json:"checkedAt"`
+	LatencyMS     int    `json:"latencyMs,omitempty"`
+	ServerName    string `json:"serverName,omitempty"`
+	ServerVersion string `json:"serverVersion,omitempty"`
+	ErrorMessage  string `json:"errorMessage,omitempty"`
+}
+
+type mediaServiceResult struct {
+	Type      string `json:"type"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Version   string `json:"version,omitempty"`
+	LatencyMS int    `json:"latencyMs,omitempty"`
+}
+
+type mediaProbeResult struct {
+	State        string               `json:"state"`
+	CheckedAt    int64                `json:"checkedAt"`
+	Services     []mediaServiceResult `json:"services"`
+	ErrorMessage string               `json:"errorMessage,omitempty"`
+}
+
+type publicMediaSystemInfo struct {
+	ServerName  string `json:"ServerName"`
+	Version     string `json:"Version"`
+	ProductName string `json:"ProductName"`
+	ID          string `json:"Id"`
+}
+
+type plexIdentity struct {
+	XMLName           xml.Name `xml:"MediaContainer"`
+	MachineIdentifier string   `xml:"machineIdentifier,attr"`
+	Version           string   `xml:"version,attr"`
+}
+
+type gameStreamServerInfo struct {
+	AppVersion string `xml:"appversion"`
+	GFEVersion string `xml:"GfeVersion"`
+	HostName   string `xml:"hostname"`
 }
 
 type accountSummary struct {
@@ -117,7 +168,6 @@ func displayAddresses(addresses []netip.Addr) []string {
 
 type networkPreferences struct {
 	RouteAll               bool `json:"routeAll"`
-	CorpDNS                bool `json:"corpDNS"`
 	ExitNodeAllowLANAccess bool `json:"exitNodeAllowLANAccess"`
 }
 
@@ -472,8 +522,7 @@ func (b *backendController) vpnConfig() string {
 	b.mu.Lock()
 	b.subnetRoutes = subnetRoutes
 	b.mu.Unlock()
-	return fmt.Sprintf("%s|%s|%s|%t", v4.String(), v6Text,
-		strings.Join(routes, ","), prefs.CorpDNS)
+	return fmt.Sprintf("%s|%s|%s", v4.String(), v6Text, strings.Join(routes, ","))
 }
 
 // exitNodes returns the exit-node choices intended for direct rendering in the
@@ -704,7 +753,6 @@ func (b *backendController) snapshot() string {
 	if prefsErr == nil && prefs != nil {
 		snapshot.NetworkSettings = networkPreferences{
 			RouteAll:               prefs.RouteAll,
-			CorpDNS:                prefs.CorpDNS,
 			ExitNodeAllowLANAccess: prefs.ExitNodeAllowLANAccess,
 		}
 	}
@@ -1470,7 +1518,6 @@ func (b *backendController) networkSettings() string {
 		cancel()
 		if prefsErr == nil && prefs != nil {
 			settings.RouteAll = prefs.RouteAll
-			settings.CorpDNS = prefs.CorpDNS
 			settings.ExitNodeAllowLANAccess = prefs.ExitNodeAllowLANAccess
 		}
 	}
@@ -1504,10 +1551,6 @@ func (b *backendController) setNetworkSetting(key string, enabled bool) string {
 		settings.RouteAll = enabled
 		masked.Prefs.RouteAll = enabled
 		masked.RouteAllSet = true
-	case "corpDNS":
-		settings.CorpDNS = enabled
-		masked.Prefs.CorpDNS = enabled
-		masked.CorpDNSSet = true
 	case "exitNodeAllowLANAccess":
 		settings.ExitNodeAllowLANAccess = enabled
 		masked.Prefs.ExitNodeAllowLANAccess = enabled
@@ -1534,7 +1577,6 @@ const networkPreferencesFile = "network-preferences.json"
 func defaultNetworkPreferences() networkPreferences {
 	return networkPreferences{
 		RouteAll:               true,
-		CorpDNS:                true,
 		ExitNodeAllowLANAccess: false,
 	}
 }
@@ -1638,7 +1680,7 @@ func restoreBackendPreferences(ctx context.Context, client *local.Client, stateD
 			maskedPrefs := &ipn.MaskedPrefs{
 				Prefs: ipn.Prefs{
 					RouteAll:               settings.RouteAll,
-					CorpDNS:                settings.CorpDNS,
+					CorpDNS:                false,
 					ExitNodeAllowLANAccess: settings.ExitNodeAllowLANAccess,
 					ExitNodeID:             selectedID,
 				},
@@ -1762,16 +1804,30 @@ func (b *backendController) peerConnectivity(peerKey string) string {
 		return marshalPeerConnectivity(result)
 	}
 
-	const attempts = 3
+	// PingDisco is Tailscale's path-discovery primitive. Unlike TSMP it reports
+	// direct endpoints, peer relays, and DERP regions without guessing from RTT.
+	const attempts = 2
 	latencies := make([]int, 0, attempts)
 	result.Sent = attempts
+	pathType := "unknown"
+	relayRegion := ""
 	for attempt := 0; attempt < attempts; attempt++ {
 		pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		pingResult, pingErr := client.Ping(pingCtx, target, tailcfg.PingTSMP)
+		pingResult, pingErr := client.Ping(pingCtx, target, tailcfg.PingDisco)
 		pingCancel()
 		if pingErr == nil && pingResult != nil && pingResult.Err == "" {
 			latencyMS := int(math.Round(pingResult.LatencySeconds * 1000))
 			latencies = append(latencies, max(0, latencyMS))
+			if pingResult.Endpoint != "" {
+				pathType = "direct"
+				relayRegion = ""
+			} else if pathType != "direct" && pingResult.PeerRelay != "" {
+				pathType = "peerRelay"
+				relayRegion = ""
+			} else if pathType != "direct" && pathType != "peerRelay" && pingResult.DERPRegionID != 0 {
+				pathType = "derp"
+				relayRegion = pingResult.DERPRegionCode
+			}
 		}
 		if attempt+1 < attempts {
 			time.Sleep(200 * time.Millisecond)
@@ -1797,7 +1853,382 @@ func (b *backendController) peerConnectivity(peerKey string) string {
 		totalLatencyMS += latencyMS
 	}
 	result.AvgLatencyMS = totalLatencyMS / result.Received
+	result.LatencyMS = result.AvgLatencyMS
+	result.PathType = pathType
+	result.RelayRegion = relayRegion
 	return marshalPeerConnectivity(result)
+}
+
+// sunshineProbe verifies the GameStream serverinfo response over the actual
+// Tailscale path. A listening TCP port alone is deliberately not considered a
+// Sunshine result. The self-signed server certificate is expected on a LAN or
+// tailnet host, so response identity is confirmed from the XML payload instead.
+func (b *backendController) sunshineProbe(peerKey string) string {
+	result := sunshineProbeResult{State: "error", CheckedAt: time.Now().UnixMilli()}
+	b.mu.Lock()
+	client := b.client
+	server := b.server
+	b.mu.Unlock()
+	if client == nil || server == nil {
+		result.ErrorMessage = "backend_unavailable"
+		return marshalSunshineProbe(result)
+	}
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	status, err := client.Status(statusCtx)
+	statusCancel()
+	if err != nil {
+		result.ErrorMessage = "status_unavailable"
+		return marshalSunshineProbe(result)
+	}
+	var target netip.Addr
+	for _, peer := range status.Peer {
+		if peerStableKey(peer.ID) != peerKey {
+			continue
+		}
+		if !peer.Online {
+			result.ErrorMessage = "peer_offline"
+			return marshalSunshineProbe(result)
+		}
+		for _, addr := range peer.TailscaleIPs {
+			if addr.Is4() {
+				target = addr
+				break
+			}
+		}
+		break
+	}
+	if !target.IsValid() {
+		result.ErrorMessage = "no_ipv4_address"
+		return marshalSunshineProbe(result)
+	}
+
+	startedAt := time.Now()
+	requestCtx, requestCancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
+	defer requestCancel()
+	// The VPN extension excludes its own bundle from the system VPN route so
+	// control and DERP traffic keep using the physical network. A default HTTP
+	// transport would therefore send this 100.x request outside Tailscale and
+	// wait until its deadline. tsnet.Server.Dial selects the embedded netstack
+	// for a tailnet destination and reserves a return path through the external
+	// TUN, while leaving all non-tailnet traffic alone.
+	var sunshineCertificateSeen atomic.Bool
+	httpClient := &http.Client{Transport: &http.Transport{
+		DialContext: server.Dial,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // #nosec G402 -- GameStream hosts use self-signed certificates.
+			VerifyPeerCertificate: func(rawCertificates [][]byte, _ [][]*x509.Certificate) error {
+				for _, rawCertificate := range rawCertificates {
+					certificate, err := x509.ParseCertificate(rawCertificate)
+					if err == nil && strings.EqualFold(strings.TrimSpace(certificate.Subject.CommonName), "Sunshine Gamestream Host") {
+						sunshineCertificateSeen.Store(true)
+						break
+					}
+				}
+				return nil
+			},
+		},
+	}}
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet,
+		"https://"+target.String()+":47984/serverinfo", nil)
+	if err != nil {
+		result.ErrorMessage = "request_invalid"
+		return marshalSunshineProbe(result)
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		// Sunshine can require a paired client certificate before it serves
+		// /serverinfo. Seeing its self-signed GameStream certificate proves that
+		// the service is present and reachable; an unauthenticated HTTP request
+		// then ends with TLS's "certificate required" alert by design.
+		if sunshineCertificateSeen.Load() && strings.Contains(strings.ToLower(err.Error()), "certificate required") {
+			result.State = "available"
+			result.LatencyMS = int(time.Since(startedAt).Milliseconds())
+			result.ServerName = "Sunshine Gamestream Host"
+			return marshalSunshineProbe(result)
+		}
+		if requestCtx.Err() == context.DeadlineExceeded {
+			result.State = "timeout"
+			result.ErrorMessage = "timeout"
+		} else {
+			result.State = "unavailable"
+			result.ErrorMessage = "serverinfo_unreachable"
+		}
+		return marshalSunshineProbe(result)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		result.State = "unavailable"
+		result.ErrorMessage = "serverinfo_http_status"
+		return marshalSunshineProbe(result)
+	}
+	var info gameStreamServerInfo
+	decoder := xml.NewDecoder(io.LimitReader(response.Body, 64*1024))
+	if err := decoder.Decode(&info); err != nil || strings.TrimSpace(info.AppVersion) == "" {
+		result.State = "unavailable"
+		result.ErrorMessage = "serverinfo_invalid"
+		return marshalSunshineProbe(result)
+	}
+	result.State = "available"
+	result.LatencyMS = int(time.Since(startedAt).Milliseconds())
+	result.ServerName = strings.TrimSpace(info.HostName)
+	result.ServerVersion = strings.TrimSpace(info.AppVersion)
+	return marshalSunshineProbe(result)
+}
+
+// mediaServiceProbe checks only the default ports for three supported media
+// servers. A successful TCP connection is never enough: Jellyfin/Emby must
+// return a typed PublicSystemInfo payload and Plex must return its identity
+// MediaContainer. The probes run concurrently under one short deadline.
+func (b *backendController) mediaServiceProbe(peerKey string) string {
+	result := mediaProbeResult{
+		State:     "error",
+		CheckedAt: time.Now().UnixMilli(),
+		Services:  []mediaServiceResult{},
+	}
+	b.mu.Lock()
+	client := b.client
+	server := b.server
+	b.mu.Unlock()
+	if client == nil || server == nil {
+		result.ErrorMessage = "backend_unavailable"
+		return marshalMediaProbe(result)
+	}
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	status, err := client.Status(statusCtx)
+	statusCancel()
+	if err != nil {
+		result.ErrorMessage = "status_unavailable"
+		return marshalMediaProbe(result)
+	}
+	var target netip.Addr
+	for _, peer := range status.Peer {
+		if peerStableKey(peer.ID) != peerKey {
+			continue
+		}
+		if !peer.Online {
+			result.State = "unavailable"
+			result.ErrorMessage = "peer_offline"
+			return marshalMediaProbe(result)
+		}
+		for _, address := range peer.TailscaleIPs {
+			if address.Is4() {
+				target = address
+				break
+			}
+		}
+		break
+	}
+	if !target.IsValid() {
+		result.State = "unavailable"
+		result.ErrorMessage = "no_ipv4_address"
+		return marshalMediaProbe(result)
+	}
+
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 3500*time.Millisecond)
+	defer probeCancel()
+	type mediaProbeTarget struct {
+		baseURL string
+		kind    string
+	}
+	targetHost := target.String()
+	probeTargets := []mediaProbeTarget{
+		{baseURL: "http://" + targetHost + ":8096", kind: "system"},
+		{baseURL: "https://" + targetHost + ":8920", kind: "system"},
+		{baseURL: "http://" + targetHost + ":32400", kind: "plex"},
+	}
+	serviceChannel := make(chan *mediaServiceResult, len(probeTargets))
+	var probes sync.WaitGroup
+	for _, probeTarget := range probeTargets {
+		probes.Add(1)
+		go func(item mediaProbeTarget) {
+			defer probes.Done()
+			if item.kind == "plex" {
+				serviceChannel <- probePlexService(probeCtx, server, item.baseURL)
+				return
+			}
+			serviceChannel <- probeSystemMediaService(probeCtx, server, item.baseURL)
+		}(probeTarget)
+	}
+	probes.Wait()
+	close(serviceChannel)
+	discovered := make([]mediaServiceResult, 0, len(probeTargets))
+	for service := range serviceChannel {
+		if service != nil {
+			discovered = append(discovered, *service)
+		}
+	}
+	sort.Slice(discovered, func(left, right int) bool {
+		if discovered[left].Type != discovered[right].Type {
+			return discovered[left].Type < discovered[right].Type
+		}
+		// Tailnet traffic is already encrypted, so prefer the conventional HTTP
+		// endpoint over a self-signed HTTPS endpoint when both identify one server.
+		leftHTTPS := strings.HasPrefix(discovered[left].URL, "https://")
+		rightHTTPS := strings.HasPrefix(discovered[right].URL, "https://")
+		if leftHTTPS != rightHTTPS {
+			return !leftHTTPS
+		}
+		return discovered[left].URL < discovered[right].URL
+	})
+	seenTypes := make(map[string]bool)
+	for _, service := range discovered {
+		if seenTypes[service.Type] {
+			continue
+		}
+		seenTypes[service.Type] = true
+		result.Services = append(result.Services, service)
+	}
+	if len(result.Services) > 0 {
+		result.State = "available"
+		return marshalMediaProbe(result)
+	}
+	result.State = "unavailable"
+	result.ErrorMessage = "no_supported_service"
+	if probeCtx.Err() == context.DeadlineExceeded {
+		result.ErrorMessage = "probe_deadline"
+	}
+	return marshalMediaProbe(result)
+}
+
+func probeSystemMediaService(ctx context.Context, server *tsnet.Server, baseURL string) *mediaServiceResult {
+	for _, path := range []string{"/System/Info/Public", "/emby/System/Info/Public"} {
+		startedAt := time.Now()
+		body, ok := fetchMediaProbeBody(ctx, server, baseURL+path)
+		if !ok {
+			continue
+		}
+		service, recognized := classifySystemMediaResponse(body, baseURL, path)
+		if recognized {
+			service.LatencyMS = int(time.Since(startedAt).Milliseconds())
+			return &service
+		}
+	}
+	return nil
+}
+
+func probePlexService(ctx context.Context, server *tsnet.Server, baseURL string) *mediaServiceResult {
+	startedAt := time.Now()
+	body, ok := fetchMediaProbeBody(ctx, server, baseURL+"/identity")
+	if !ok {
+		return nil
+	}
+	service, recognized := classifyPlexIdentity(body, baseURL)
+	if !recognized {
+		return nil
+	}
+	service.LatencyMS = int(time.Since(startedAt).Milliseconds())
+	return &service
+}
+
+func fetchMediaProbeBody(ctx context.Context, server *tsnet.Server, requestURL string) ([]byte, bool) {
+	transport := &http.Transport{
+		DialContext: server.Dial,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // #nosec G402 -- local media servers commonly use self-signed certificates.
+		},
+	}
+	defer transport.CloseIdleConnections()
+	httpClient := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, false
+	}
+	request.Header.Set("Accept", "application/json, application/xml, text/xml")
+	request.Header.Set("User-Agent", "MeshArc-MediaDiscovery/1")
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, false
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, false
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 128*1024))
+	return body, err == nil && len(body) > 0
+}
+
+func classifySystemMediaResponse(body []byte, baseURL, path string) (mediaServiceResult, bool) {
+	var info publicMediaSystemInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return mediaServiceResult{}, false
+	}
+	product := strings.ToLower(strings.TrimSpace(info.ProductName))
+	serviceType := ""
+	displayName := ""
+	switch {
+	case strings.Contains(product, "jellyfin"):
+		serviceType = "jellyfin"
+		displayName = "Jellyfin"
+	case strings.Contains(product, "emby"):
+		serviceType = "emby"
+		displayName = "Emby"
+	default:
+		return mediaServiceResult{}, false
+	}
+	serverName := strings.TrimSpace(info.ServerName)
+	if serverName == "" {
+		serverName = displayName
+	}
+	serverURL := baseURL
+	if serviceType == "emby" && strings.HasPrefix(path, "/emby/") {
+		serverURL += "/emby"
+	}
+	return mediaServiceResult{
+		Type:    serviceType,
+		Name:    serverName,
+		URL:     serverURL,
+		Version: strings.TrimSpace(info.Version),
+	}, true
+}
+
+func classifyPlexIdentity(body []byte, baseURL string) (mediaServiceResult, bool) {
+	var identity plexIdentity
+	if err := xml.Unmarshal(body, &identity); err != nil ||
+		identity.XMLName.Local != "MediaContainer" ||
+		strings.TrimSpace(identity.MachineIdentifier) == "" ||
+		strings.TrimSpace(identity.Version) == "" {
+		return mediaServiceResult{}, false
+	}
+	return mediaServiceResult{
+		Type:    "plex",
+		Name:    "Plex Media Server",
+		URL:     baseURL,
+		Version: strings.TrimSpace(identity.Version),
+	}, true
+}
+
+func mediaProbeSelfTest() string {
+	jellyfinBody := []byte(`{"ServerName":"Fixture NAS","Version":"10.10.7","ProductName":"Jellyfin Server","Id":"fixture"}`)
+	embyBody := []byte(`{"ServerName":"Fixture Emby","Version":"4.8.11","ProductName":"Emby Server","Id":"fixture"}`)
+	unknownBody := []byte(`{"ServerName":"Web Server","Version":"1.0","ProductName":"Unknown"}`)
+	plexBody := []byte(`<MediaContainer size="0" machineIdentifier="fixture" version="1.41.4.9463"/>`)
+	jellyfin, jellyfinOK := classifySystemMediaResponse(jellyfinBody, "http://100.64.0.10:8096",
+		"/System/Info/Public")
+	emby, embyOK := classifySystemMediaResponse(embyBody, "http://100.64.0.10:8096",
+		"/emby/System/Info/Public")
+	_, unknownOK := classifySystemMediaResponse(unknownBody, "http://100.64.0.10:8096",
+		"/System/Info/Public")
+	plex, plexOK := classifyPlexIdentity(plexBody, "http://100.64.0.10:32400")
+	passed := jellyfinOK && jellyfin.Type == "jellyfin" &&
+		embyOK && emby.Type == "emby" && emby.URL == "http://100.64.0.10:8096/emby" &&
+		!unknownOK && plexOK && plex.Type == "plex"
+	state := "failed"
+	if passed {
+		state = "passed"
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"state": state,
+		"cases": 4,
+	})
+	if err != nil {
+		return `{"state":"failed","cases":0,"errorMessage":"encoding_failed"}`
+	}
+	return string(encoded)
 }
 
 func marshalPeerConnectivity(result peerConnectivityResult) string {
@@ -1808,97 +2239,20 @@ func marshalPeerConnectivity(result peerConnectivityResult) string {
 	return string(encoded)
 }
 
-// magicDNSProbeURL returns an in-memory-only browser target for one online
-// peer. Callers must never display, log, or persist the returned URL.
-func (b *backendController) magicDNSProbeURL() string {
-	b.mu.Lock()
-	client := b.client
-	b.mu.Unlock()
-	if client == nil {
-		return "FAILED | MagicDNS probe | backend not ready"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	status, err := client.Status(ctx)
+func marshalSunshineProbe(result sunshineProbeResult) string {
+	encoded, err := json.Marshal(result)
 	if err != nil {
-		return "FAILED | MagicDNS probe | status unavailable"
+		return `{"state":"error","checkedAt":0,"errorMessage":"encoding_failed"}`
 	}
-	prefs, prefsErr := client.GetPrefs(ctx)
-	if prefsErr != nil || prefs == nil || !prefs.CorpDNS {
-		return "SKIPPED | MagicDNS probe | Tailscale DNS disabled"
-	}
-	if status.CurrentTailnet == nil {
-		return "FAILED | MagicDNS probe | tailnet state not ready"
-	}
-	if !status.CurrentTailnet.MagicDNSEnabled {
-		return "SKIPPED | MagicDNS probe | disabled by tailnet policy"
-	}
-	host, _, ok := selectMagicDNSPeer(status)
-	if ok {
-		return (&url.URL{Scheme: "http", Host: host, Path: "/"}).String()
-	}
-	return "SKIPPED | MagicDNS probe | no online named peer"
+	return string(encoded)
 }
 
-func (b *backendController) armMagicDNSProbe() string {
-	b.mu.Lock()
-	client := b.client
-	device := b.tunDevice
-	b.mu.Unlock()
-	if client == nil || device == nil {
-		return "FAILED | MagicDNS probe | VPN backend not ready"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	status, err := client.Status(ctx)
+func marshalMediaProbe(result mediaProbeResult) string {
+	encoded, err := json.Marshal(result)
 	if err != nil {
-		return "FAILED | MagicDNS probe | status unavailable"
+		return `{"state":"error","checkedAt":0,"services":[],"errorMessage":"encoding_failed"}`
 	}
-	prefs, prefsErr := client.GetPrefs(ctx)
-	if prefsErr != nil || prefs == nil || !prefs.CorpDNS {
-		return "SKIPPED | MagicDNS probe | Tailscale DNS disabled"
-	}
-	if status.CurrentTailnet == nil {
-		return "FAILED | MagicDNS probe | tailnet state not ready"
-	}
-	if !status.CurrentTailnet.MagicDNSEnabled {
-		return "SKIPPED | MagicDNS probe | disabled by tailnet policy"
-	}
-	host, peerIP, ok := selectMagicDNSPeer(status)
-	if !ok {
-		return "SKIPPED | MagicDNS probe | no online named peer"
-	}
-	if !device.armMagicDNS(host, peerIP) {
-		return "FAILED | MagicDNS probe | target unavailable"
-	}
-	return "OK | MagicDNS probe armed"
-}
-
-func selectMagicDNSPeer(status *ipnstate.Status) (host string, ipv4 netip.Addr, ok bool) {
-	type candidate struct {
-		host string
-		ip   netip.Addr
-	}
-	candidates := make([]candidate, 0)
-	for _, peer := range status.Peer {
-		host := strings.TrimSuffix(peer.DNSName, ".")
-		if !peer.Online || host == "" || strings.ContainsAny(host, "/?#@:") {
-			continue
-		}
-		for _, address := range peer.TailscaleIPs {
-			if address.Is4() {
-				candidates = append(candidates, candidate{host: host, ip: address})
-				break
-			}
-		}
-	}
-	if len(candidates) == 0 {
-		return "", netip.Addr{}, false
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].host < candidates[j].host
-	})
-	return candidates[0].host, candidates[0].ip, true
+	return string(encoded)
 }
 
 // userLogf records only coarse progress markers. In particular, it never
@@ -2075,37 +2429,24 @@ func (b *backendController) formatRunningStatus(
 	exitNodeSelected := prefsErr == nil && prefs != nil &&
 		(!prefs.ExitNodeID.IsZero() || prefs.ExitNodeIP.IsValid())
 	subnetRoutesEnabled := prefsErr == nil && prefs != nil && prefs.RouteAll
-	corpDNSEnabled := prefsErr == nil && prefs != nil && prefs.CorpDNS
 	exitNodeLANEnabled := prefsErr == nil && prefs != nil && prefs.ExitNodeAllowLANAccess
-	magicDNSState := "unknown"
-	if status.CurrentTailnet != nil {
-		if status.CurrentTailnet.MagicDNSEnabled {
-			magicDNSState = "enabled"
-		} else {
-			magicDNSState = "disabled"
-		}
-	}
 	var tunRead, tunWritten, txBytes, rxBytes, trafficSession uint64
 	var tunReadErrors, tunWriteErrors uint64
 	var dnsQueries, dnsResponses, dnsAnswers uint64
-	var magicArmed bool
-	var magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn uint64
 	if tunDevice != nil {
 		tunRead, tunWritten = tunDevice.packetCounts()
 		txBytes, rxBytes, trafficSession = tunDevice.trafficCounts()
 		tunReadErrors, tunWriteErrors = tunDevice.errorCounts()
 		dnsQueries, dnsResponses, dnsAnswers = tunDevice.dnsCounts()
-		magicArmed, magicQueries, magicResponses, magicAnswers, magicPeerOut, magicPeerIn = tunDevice.magicDNSCounts()
 	}
 	return fmt.Sprintf(
-		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | corpDNS=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | tunReadErrors=%d | tunWriteErrors=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | magicDNSState=%s | magicArmed=%t | magicQ=%d | magicR=%d | magicA=%d | magicOut=%d | magicIn=%d | netUp=unknown | phase=%s",
+		"OK | state=%s | loginURLReady=%t | tailscaleIPs=%d | tun=%t | exitNode=%t | routeAll=%t | exitNodeLAN=%t | subnetRoutes=%d | tunRead=%d | tunWrite=%d | tunReadErrors=%d | tunWriteErrors=%d | trafficSession=%d | txBytes=%d | rxBytes=%d | dnsQ=%d | dnsR=%d | dnsA=%d | netUp=unknown | phase=%s",
 		status.BackendState,
 		status.AuthURL != "",
 		len(status.TailscaleIPs),
 		status.TUN || externalTun,
 		exitNodeSelected,
 		subnetRoutesEnabled,
-		corpDNSEnabled,
 		exitNodeLANEnabled,
 		subnetRoutes,
 		tunRead,
@@ -2118,13 +2459,6 @@ func (b *backendController) formatRunningStatus(
 		dnsQueries,
 		dnsResponses,
 		dnsAnswers,
-		magicDNSState,
-		magicArmed,
-		magicQueries,
-		magicResponses,
-		magicAnswers,
-		magicPeerOut,
-		magicPeerIn,
 		phase,
 	)
 }

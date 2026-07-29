@@ -42,11 +42,9 @@ Verified on a HarmonyOS 6.1 phone:
 - exit-node choice restored across UI-to-Extension handoff and repeated signed
   HAP replacement installs without requiring the user to select it again.
 
-MagicDNS is treated as an optional feature. The client now has an
-identity-redacted DNS/TUN probe, but the current test tailnet returns NXDOMAIN
-for the same node name on both this HarmonyOS port and an Android Tailscale
-client. Direct Tailscale-IP traffic remains fully functional, so this
-cross-platform DNS-record result does not block the MVP.
+MagicDNS support is currently disabled. The HarmonyOS VPN configuration does
+not publish Tailscale DNS servers or search domains, and peer actions expose
+Tailscale IP addresses only.
 
 TODO(LiveView): add the opt-in Tailscale traffic LiveView only after the
 application has received the official HarmonyOS LiveView entitlement and an
@@ -56,16 +54,11 @@ nine-dot mark, and expose only current-session upload/download byte totals.
 Until the entitlement is available, do not show a non-functional LiveView
 switch in Settings.
 
-TODO(MagicDNS): repeat the end-to-end named-peer lookup on a tailnet with a
-known-good MagicDNS record and promote the feature from optional only after a
-positive DNS answer and successful peer traffic are both observed. Until then,
-do not claim complete MagicDNS compatibility in the user interface.
-
 The bilingual Chinese/English UI uses the SDK 23 HDS floating bottom navigation
 with immersive system material. Home owns connection state, the single
 `Connect` / `Disconnect` action, exit-node selection, the read-only peer view,
 Settings owns persistent disconnected-state controls for subnet-route acceptance,
-Tailscale DNS, and LAN access while using an exit node, the four-level
+LAN access while using an exit node, the four-level
 immersive-glow preference, and account management. Connected-state
 network controls become read-only so changing VPN routes never produces a
 partially updated live tunnel. A confirmation-guarded logout action is
@@ -78,6 +71,11 @@ This project intentionally does not request or implement application
 auto-start. After a device reboot, the app rejects the previous session's stale
 heartbeat and restores the authenticated backend safely when opened; the user
 then reconnects the system VPN from the app.
+
+The device service center also contains an on-demand Jellyfin, Emby, and Plex
+probe plus a disabled-by-default HosPlayer handoff prototype. See
+[`docs/hosplayer-integration-prototype.md`](docs/hosplayer-integration-prototype.md)
+for the parameter contract, privacy rules, and server-free engineering test.
 
 ## Important port details
 

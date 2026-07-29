@@ -16,7 +16,6 @@ export interface DiagnosticReportInput {
   engineStatus: string;
   backendStatus: string;
   vpnStatus: string;
-  magicDNSStatus: string;
   peerCount: number;
   onlinePeerCount: number;
   exitNodeCount: number;
@@ -24,7 +23,6 @@ export interface DiagnosticReportInput {
   addressCount: number;
   signedIn: boolean;
   routeAll: boolean;
-  corpDNS: boolean;
   exitNodeAllowLANAccess: boolean;
 }
 
@@ -63,7 +61,6 @@ interface DiagnosticNetwork {
   exitNodeSelected: boolean;
   assignedAddressCount: number;
   acceptSubnetRoutes: boolean;
-  useTailscaleDNS: boolean;
   exitNodeAllowLANAccess: boolean;
 }
 
@@ -72,7 +69,6 @@ interface DiagnosticStatusSet {
   engine: DiagnosticCheck;
   backend: DiagnosticCheck;
   vpnExtension: DiagnosticCheck;
-  magicDNS: DiagnosticCheck;
 }
 
 interface DiagnosticVpnConfig {
@@ -200,15 +196,13 @@ export class DiagnosticReportService {
         exitNodeSelected: input.exitNodeSelected,
         assignedAddressCount: DiagnosticReportService.nonNegative(input.addressCount),
         acceptSubnetRoutes: input.routeAll,
-        useTailscaleDNS: input.corpDNS,
         exitNodeAllowLANAccess: input.exitNodeAllowLANAccess
       },
       status: {
         nativeBridge: DiagnosticReportService.classifyStatus(input.nativeStatus),
         engine: DiagnosticReportService.classifyStatus(input.engineStatus),
         backend: DiagnosticReportService.classifyStatus(input.backendStatus),
-        vpnExtension: DiagnosticReportService.classifyStatus(input.vpnStatus),
-        magicDNS: DiagnosticReportService.classifyStatus(input.magicDNSStatus)
+        vpnExtension: DiagnosticReportService.classifyStatus(input.vpnStatus)
       },
       vpnConfig: DiagnosticReportService.readVpnConfig(filesDir),
       tunCounters: DiagnosticReportService.readTunCounters(input.vpnStatus),
@@ -345,7 +339,6 @@ export class DiagnosticReportService {
       `Assigned address count: ${report.network.assignedAddressCount}`,
       `Backend: ${report.status.backend.state}`,
       `VPN extension: ${report.status.vpnExtension.state}`,
-      `MagicDNS: ${report.status.magicDNS.state}`,
       '',
       'Submitted VPN configuration (addresses redacted)',
       `Available: ${report.vpnConfig.available}`,

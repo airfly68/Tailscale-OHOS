@@ -13,6 +13,28 @@ import {
 } from '../services/DiagnosticReportService';
 import { DeviceNameService } from '../services/DeviceNameService';
 import { APP_FOREGROUND_EVENT } from '../services/AppLifecycleEvents';
+import { SunshineProbeService } from '../services/SunshineProbeService';
+import { PeerPathService } from '../services/PeerPathService';
+import { MoonlightLauncher } from '../services/MoonlightLauncher';
+import { buildStreamProfile } from '../services/StreamProfileBuilder';
+import { PeerPathResult, StreamLaunchProfile, SunshineProbeResult } from '../services/StreamingModels';
+import { HosPlayerLauncher } from '../services/HosPlayerLauncher';
+import {
+  DiscoveredMediaService,
+  HosPlayerLaunchRequest,
+  MediaProbeResult
+} from '../services/MediaIntegrationModels';
+import { MediaServiceProbeService } from '../services/MediaServiceProbeService';
+import { SunshineStatusBadge } from './SunshineStatusBadge';
+import { MediaStatusBadge } from './MediaStatusBadge';
+import { DeviceConnectionInfoPanel } from './DeviceConnectionInfoPanel';
+import { DeviceActionButtons } from './DeviceActionButtons';
+import { CompactConnectedHomeHeader } from './CompactConnectedHomeHeader';
+import { ConnectionDetailsSheet } from './ConnectionDetailsSheet';
+import { HomeConnectionSection } from './HomeConnectionSection';
+import { LegacyConnectedHomeHeader } from './LegacyConnectedHomeHeader';
+import { ConnectedHomeLayoutMode, DEFAULT_CONNECTED_HOME_LAYOUT } from './HomeLayoutConfig';
+import { HomeLayoutPreferences } from './HomeLayoutPreferences';
 import {
   BlurStrategy,
   DividerMode,
@@ -92,7 +114,6 @@ interface PeerSummary {
 
 interface NetworkSettings {
   routeAll: boolean;
-  corpDNS: boolean;
   exitNodeAllowLANAccess: boolean;
 }
 
@@ -120,6 +141,27 @@ interface PeerConnectivityResult {
   minLatencyMs: number;
   avgLatencyMs: number;
   maxLatencyMs: number;
+}
+
+interface DeviceStreamingState {
+  peerKey: string;
+  sunshine: SunshineProbeResult;
+  path: PeerPathResult;
+  checking: boolean;
+  launching: boolean;
+}
+
+interface DeviceMediaState {
+  peerKey: string;
+  result: MediaProbeResult;
+  checking: boolean;
+  launching: boolean;
+}
+
+interface MediaProbeSelfTestResult {
+  state: string;
+  cases: number;
+  errorMessage?: string;
 }
 
 interface AccountSummary {
@@ -311,12 +353,10 @@ export struct BridgeStatus {
   @State loginHandoffStatus: string = 'Secure Login Pending';
   @State controlProbeStatus: string = 'Control TLS Probe Pending';
   @State vpnStatus: string = 'HarmonyOS VPN Extension Stopped';
-  @State magicDNSProbeStatus: string = 'MagicDNS Probe Pending';
   @State exitNodes: ExitNodeChoice[] = [];
   @State peers: PeerSummary[] = [];
   @State networkSettings: NetworkSettings = {
     routeAll: true,
-    corpDNS: true,
     exitNodeAllowLANAccess: false
   };
   @State networkSettingStatus: string = '';
@@ -351,6 +391,11 @@ export struct BridgeStatus {
     state: '', reason: '', sent: 0, received: 0, lossPercent: 0,
     minLatencyMs: 0, avgLatencyMs: 0, maxLatencyMs: 0
   };
+  @State streamingStates: DeviceStreamingState[] = [];
+  @State mediaStates: DeviceMediaState[] = [];
+  @State mediaSelfTestStatus: string = '';
+  @State mediaSelfTestInProgress: boolean = false;
+  @State fakeMediaServiceOnline: boolean = false;
   @State taildropState: string = 'disconnected';
   @State taildropReason: string = '';
   @State taildropTargets: TaildropTargetSummary[] = [];
@@ -387,6 +432,9 @@ export struct BridgeStatus {
   @State diagnosticActionStatus: string = '';
   @State diagnosticActionInProgress: boolean = false;
   @State glowLevel: number = 3;
+  @State connectedHomeLayoutMode: ConnectedHomeLayoutMode = DEFAULT_CONNECTED_HOME_LAYOUT;
+  @State connectionDetailsVisible: boolean = false;
+  @State homeTitleCompact: boolean = false;
   @State layoutWidth: number = 360;
   @State expandedPeerKeys: string[] = [];
   private connectionPollTimer: number = -1;
@@ -399,8 +447,6 @@ export struct BridgeStatus {
   private cachedVpnConnectConfigAtMs: number = 0;
   private healthPollTimer: number = -1;
   private loginPollTimer: number = -1;
-  private magicDNSProbeUrl: string = '';
-  private homeScroller: Scroller = new Scroller();
   private transferScroller: Scroller = new Scroller();
   private settingsScroller: Scroller = new Scroller();
   private tabsController: HdsTabsController = new HdsTabsController();
@@ -433,11 +479,42 @@ export struct BridgeStatus {
   private taildropPickerOpen: boolean = false;
   private taildropTextTarget?: TaildropTargetSummary;
   private peerDataSource: PeerDataSource = new PeerDataSource();
+  private sunshineProbeService?: SunshineProbeService;
+  private peerPathService?: PeerPathService;
+  private moonlightLauncher?: MoonlightLauncher;
+  private mediaServiceProbeService?: MediaServiceProbeService;
+  private hosPlayerLauncher?: HosPlayerLauncher;
+  private streamingRequestIds: Map<string, number> = new Map();
+  private mediaRequestIds: Map<string, number> = new Map();
+  private autoProbedPeerSessions: Map<string, number> = new Map();
   private appForegroundListener: () => void = () => this.handleAppForeground();
 
   private applyPeers(peers: PeerSummary[]): void {
     this.peers = peers;
     this.peerDataSource.replaceAll(peers);
+    const onlineKeys: string[] = peers.filter((peer: PeerSummary) => peer.online)
+      .map((peer: PeerSummary) => peer.key);
+    this.expandedPeerKeys = this.expandedPeerKeys.filter((key: string) => onlineKeys.includes(key));
+    this.streamingStates = this.streamingStates.filter((state: DeviceStreamingState) => {
+      const peer: PeerSummary | undefined = peers.find((item: PeerSummary) => item.key === state.peerKey);
+      if (peer === undefined || !peer.online) {
+        this.sunshineProbeService?.cancel(state.peerKey);
+        this.peerPathService?.cancel(state.peerKey);
+        return false;
+      }
+      return true;
+    });
+    this.mediaStates = this.mediaStates.filter((state: DeviceMediaState) => {
+      const peer: PeerSummary | undefined = peers.find((item: PeerSummary) => item.key === state.peerKey);
+      if (peer === undefined || !peer.online) {
+        this.mediaServiceProbeService?.cancel(state.peerKey);
+        return false;
+      }
+      return true;
+    });
+    if (this.isConnected()) {
+      this.scheduleLifecycleTask(() => this.autoProbeConnectedPeerServices(), 50);
+    }
   }
 
   aboutToAppear(): void {
@@ -445,6 +522,8 @@ export struct BridgeStatus {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     context.eventHub.on(APP_FOREGROUND_EVENT, this.appForegroundListener);
     this.loadGlowLevel();
+    this.fakeMediaServiceOnline = false;
+    this.loadConnectedHomeLayoutPreference(context);
     this.resetDiagnosticsMode();
     this.backendReady = false;
     this.devicesLoading = true;
@@ -499,6 +578,13 @@ export struct BridgeStatus {
     this.stopHealthPolling();
     this.stopLoginPolling();
     this.stopPeerConnectivityPolling();
+    this.streamingStates.forEach((state: DeviceStreamingState) => {
+      this.sunshineProbeService?.cancel(state.peerKey);
+      this.peerPathService?.cancel(state.peerKey);
+    });
+    this.mediaStates.forEach((state: DeviceMediaState) => {
+      this.mediaServiceProbeService?.cancel(state.peerKey);
+    });
     this.stopVpnStopPolling();
     this.peerConnectivityInProgress = false;
     this.clearLifecycleTimers();
@@ -1128,14 +1214,6 @@ export struct BridgeStatus {
         this.setConnectInProgress(false);
         return;
       }
-      const magicDNSProbeUrl: string = await nativeBridge.backendMagicDNSProbeURLAsync();
-      if (magicDNSProbeUrl.startsWith('http://')) {
-        this.magicDNSProbeUrl = magicDNSProbeUrl;
-        this.magicDNSProbeStatus = 'MagicDNS identity-redacted probe ready';
-      } else {
-        this.magicDNSProbeUrl = '';
-        this.magicDNSProbeStatus = magicDNSProbeUrl;
-      }
       if (this.stageVpnConnectConfig(backendConfig)) {
         this.recordDiagnosticEvent('vpn_config_handoff_staged', 'preflight');
       } else {
@@ -1202,22 +1280,6 @@ export struct BridgeStatus {
         this.vpnStatus = `FAILED | VPN start | code=${error.code}`;
         this.clearConnectionCompletionTimer();
         this.setConnectInProgress(false);
-      });
-  }
-
-  private runMagicDNSProbe(): void {
-    if (!this.magicDNSProbeUrl.startsWith('http://')) {
-      this.magicDNSProbeStatus = 'SKIPPED | MagicDNS probe | no in-memory target';
-      return;
-    }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    this.magicDNSProbeStatus = 'Opening identity-redacted MagicDNS probe';
-    context.openLink(this.magicDNSProbeUrl, { appLinkingOnly: false })
-      .then(() => {
-        this.magicDNSProbeStatus = 'MagicDNS browser probe opened';
-      })
-      .catch(() => {
-        this.magicDNSProbeStatus = 'FAILED | MagicDNS browser probe';
       });
   }
 
@@ -1291,8 +1353,11 @@ export struct BridgeStatus {
     vpnExtension.stopVpnExtensionAbility(this.vpnWant())
       .then(() => {
         this.recordDiagnosticEvent('disconnect_completed', 'system');
-        this.vpnStatus = 'HarmonyOS VPN Extension stopped';
-        this.disconnectInProgress = false;
+        this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseInOut }, () => {
+          this.vpnStatus = 'HarmonyOS VPN Extension stopped';
+          this.disconnectInProgress = false;
+          this.homeTitleCompact = false;
+        });
         this.stopConnectionPolling();
         if (!this.deferBackendRestart()) {
           this.startBackend(false);
@@ -1301,8 +1366,11 @@ export struct BridgeStatus {
       })
       .catch((error: BusinessError) => {
         this.recordDiagnosticEvent('disconnect_failed', 'system', error.code);
-        this.vpnStatus = `FAILED | VPN stop | code=${error.code}`;
-        this.disconnectInProgress = false;
+        this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseInOut }, () => {
+          this.vpnStatus = `FAILED | VPN stop | code=${error.code}`;
+          this.disconnectInProgress = false;
+          this.homeTitleCompact = false;
+        });
       });
   }
 
@@ -1431,9 +1499,8 @@ export struct BridgeStatus {
     return maximum;
   }
 
-  private trafficChartPoints(download: boolean): Array<Array<number>> {
+  private trafficChartPoints(download: boolean, height: number = 68): Array<Array<number>> {
     const width: number = this.trafficChartWidth();
-    const height: number = 68;
     if (this.trafficSamples.length === 0) {
       return [[0, height - 4], [width, height - 4]];
     }
@@ -1477,6 +1544,7 @@ export struct BridgeStatus {
       } else {
         this.resetTrafficMetrics();
         this.resetTaildropSnapshot();
+        this.resetStreamingStatesForDisconnect();
       }
       const shouldPromptVpnConflict: boolean = extensionIsLive && this.connectInProgress &&
         visibleStatus.includes(`code=2203002`);
@@ -1496,6 +1564,10 @@ export struct BridgeStatus {
       }
       this.vpnStatus = !extensionIsLive && visibleStatus.includes('tun=true') ?
         'HarmonyOS VPN Extension Stopped (previous session ended)' : visibleStatus;
+      this.syncHomeTitleCompact(this.connectedHomeLayoutActive());
+      if (!visibleStatus.includes('state=Running')) {
+        this.resetStreamingStatesForDisconnect();
+      }
       if (extensionIsLive &&
         (visibleStatus.includes('state=Running') || visibleStatus.startsWith('FAILED'))) {
         this.clearConnectionCompletionTimer();
@@ -1567,8 +1639,19 @@ export struct BridgeStatus {
     this.getUIContext().animateTo({ duration: 500, curve: Curve.EaseInOut }, () => {
       this.vpnStatus = status;
       this.setConnectInProgress(false);
+      this.homeTitleCompact = true;
     });
+    this.scheduleLifecycleTask(() => this.autoProbeConnectedPeerServices(), 50);
     this.stopConnectionPolling();
+  }
+
+  private syncHomeTitleCompact(compact: boolean): void {
+    if (this.homeTitleCompact === compact) {
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 420, curve: Curve.EaseInOut }, () => {
+      this.homeTitleCompact = compact;
+    });
   }
 
   private taildropSnapshotFilePath(): string {
@@ -1612,7 +1695,6 @@ export struct BridgeStatus {
     this.taildropState = 'disconnected';
     this.taildropReason = '';
     this.taildropTargets = [];
-    this.expandedTaildropTargetKey = '';
     this.taildropWaitingFiles = [];
     this.taildropInboxReason = '';
     if (this.taildropReceiveInProgress) {
@@ -1897,7 +1979,6 @@ export struct BridgeStatus {
       engineStatus: this.engineStatus,
       backendStatus: this.backendStatus,
       vpnStatus: this.vpnStatus,
-      magicDNSStatus: this.magicDNSProbeStatus,
       peerCount: this.peers.length,
       onlinePeerCount: this.onlinePeerCount(),
       exitNodeCount: this.exitNodes.length,
@@ -1905,7 +1986,6 @@ export struct BridgeStatus {
       addressCount: this.accountSummary.addresses.length,
       signedIn: this.isAuthenticated(),
       routeAll: this.networkSettings.routeAll,
-      corpDNS: this.networkSettings.corpDNS,
       exitNodeAllowLANAccess: this.networkSettings.exitNodeAllowLANAccess
     };
     try {
@@ -2112,6 +2192,14 @@ export struct BridgeStatus {
     return addresses.length > 0 ? addresses[0] : '';
   }
 
+  private peerDisplayName(name: string): string {
+    if (!name.toLowerCase().endsWith('.ts.net')) {
+      return name;
+    }
+    const firstDot: number = name.indexOf('.');
+    return firstDot > 0 ? name.substring(0, firstDot) : name;
+  }
+
   private deviceNeedsApproval(): boolean {
     return this.accountSummary.needsApproval || this.backendStatus.includes('NeedsMachineAuth');
   }
@@ -2142,15 +2230,6 @@ export struct BridgeStatus {
       return $r('app.string.setting_unavailable');
     }
     return status.includes('routeAll=true') ? $r('app.string.setting_enabled') :
-      $r('app.string.setting_disabled');
-  }
-
-  private magicDNSSettingState(): ResourceStr {
-    const status: string = this.settingsStatusText();
-    if (!status.includes('corpDNS=')) {
-      return $r('app.string.setting_unavailable');
-    }
-    return status.includes('corpDNS=true') ? $r('app.string.setting_enabled') :
       $r('app.string.setting_disabled');
   }
 
@@ -2438,6 +2517,625 @@ export struct BridgeStatus {
       }
       this.expandedPeerKeys = this.expandedPeerKeys.concat(peerKey);
     });
+  }
+
+  private async loadConnectedHomeLayoutPreference(context: common.Context): Promise<void> {
+    this.connectedHomeLayoutMode = await HomeLayoutPreferences.load(context);
+  }
+
+  private setConnectedHomeLayoutMode(mode: ConnectedHomeLayoutMode): void {
+    if (this.connectedHomeLayoutMode === mode) {
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 240, curve: Curve.EaseOut }, () => {
+      this.connectedHomeLayoutMode = mode;
+    });
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    HomeLayoutPreferences.save(context, mode).catch(() => {
+      // The layout is still changed for this session when persistence is unavailable.
+    });
+  }
+
+  private connectedHomeLayoutActive(): boolean {
+    return this.isConnected() || this.disconnectInProgress ||
+      (this.isConnecting() && this.trafficSession > 0);
+  }
+
+  private selectedExitNodeName(): string {
+    const selected: ExitNodeChoice | undefined = this.exitNodes.find(
+      (choice: ExitNodeChoice) => choice.selected);
+    return selected === undefined ? '' : selected.name;
+  }
+
+  private connectedDurationLabel(): string {
+    if (this.connectionStartedAtMs <= 0) {
+      return '\u521A\u521A\u8FDE\u63A5';
+    }
+    const elapsedSeconds: number = Math.max(0, Math.floor((Date.now() - this.connectionStartedAtMs) / 1000));
+    const hours: number = Math.floor(elapsedSeconds / 3600);
+    const minutes: number = Math.floor((elapsedSeconds % 3600) / 60);
+    const seconds: number = elapsedSeconds % 60;
+    if (hours > 0) {
+      return `${hours} \u5C0F\u65F6 ${minutes} \u5206\u949F`;
+    }
+    if (minutes > 0) {
+      return `${minutes} \u5206\u949F ${seconds} \u79D2`;
+    }
+    return `${seconds} 秒`;
+  }
+
+  private openConnectionDetails(): void {
+    if (this.connectedHomeLayoutActive()) {
+      this.connectionDetailsVisible = true;
+    }
+  }
+
+  private showExitNodeConnectionHint(): void {
+    this.showToast('\u8FDE\u63A5\u671F\u95F4\u4E0D\u53EF\u66F4\u6539\u51FA\u53E3\u8282\u70B9\uFF0C\u8BF7\u65AD\u5F00\u540E\u5728\u4E3B\u9875\u9009\u62E9\u3002');
+  }
+
+  private togglePeer(peer: PeerSummary): void {
+    if (!peer.online && !this.isPeerNameExpanded(peer.key)) {
+      return;
+    }
+    const opening: boolean = !this.isPeerNameExpanded(peer.key);
+    this.togglePeerName(peer.key);
+    if (opening && this.isSunshineCandidate(peer)) {
+      this.detectStreamingForPeer(peer, false);
+    }
+  }
+
+  private refreshPeerServices(peer: PeerSummary): void {
+    if (this.isSunshineCandidate(peer)) {
+      this.detectStreamingForPeer(peer, true);
+    }
+    this.detectMediaForPeer(peer, true);
+  }
+
+  private autoProbeConnectedPeerServices(): void {
+    if (!this.isConnected()) {
+      return;
+    }
+    const session: number = Math.max(1, this.trafficSession);
+    this.peers.filter((peer: PeerSummary) => peer.online && peer.addresses.length > 0)
+      .forEach((peer: PeerSummary) => {
+        if (this.autoProbedPeerSessions.get(peer.key) === session) {
+          return;
+        }
+        this.autoProbedPeerSessions.set(peer.key, session);
+        if (this.isSunshineCandidate(peer)) {
+          this.detectStreamingForPeer(peer, false);
+        }
+        this.detectMediaForPeer(peer, false);
+      });
+  }
+
+  private isSunshineCandidate(peer: PeerSummary): boolean {
+    if (!peer.online || peer.addresses.length === 0) {
+      return false;
+    }
+    const os: string = peer.os.toLowerCase();
+    return os.includes('windows') || os.includes('linux') || os.includes('macos') || os.includes('darwin');
+  }
+
+  private streamingState(peerKey: string): DeviceStreamingState {
+    const existing: DeviceStreamingState | undefined = this.streamingStates.find(
+      (state: DeviceStreamingState) => state.peerKey === peerKey);
+    if (existing !== undefined) {
+      return existing;
+    }
+    return {
+      peerKey: peerKey,
+      sunshine: { state: 'unknown', checkedAt: 0 },
+      path: { type: 'unknown', checkedAt: 0 },
+      checking: false,
+      launching: false
+    };
+  }
+
+  private copyStreamingState(state: DeviceStreamingState, sunshine?: SunshineProbeResult,
+    path?: PeerPathResult, checking?: boolean, launching?: boolean): DeviceStreamingState {
+    return {
+      peerKey: state.peerKey,
+      sunshine: sunshine === undefined ? state.sunshine : sunshine,
+      path: path === undefined ? state.path : path,
+      checking: checking === undefined ? state.checking : checking,
+      launching: launching === undefined ? state.launching : launching
+    };
+  }
+
+  private updateStreamingState(peerKey: string, update: DeviceStreamingState): void {
+    const index: number = this.streamingStates.findIndex(
+      (state: DeviceStreamingState) => state.peerKey === peerKey);
+    if (index < 0) {
+      this.streamingStates = this.streamingStates.concat(update);
+      return;
+    }
+    const next: DeviceStreamingState[] = this.streamingStates.slice();
+    next[index] = update;
+    this.streamingStates = next;
+  }
+
+  private resetStreamingStatesForDisconnect(): void {
+    this.streamingRequestIds.clear();
+    this.mediaRequestIds.clear();
+    this.autoProbedPeerSessions.clear();
+    this.sunshineProbeService?.clearCache();
+    this.peerPathService?.clearCache();
+    this.mediaServiceProbeService?.clearCache();
+    this.streamingStates = this.streamingStates.map((state: DeviceStreamingState) =>
+      this.copyStreamingState(state,
+        { state: 'unknown', checkedAt: Date.now(), errorMessage: 'mesh_disconnected' },
+        { type: 'unknown', checkedAt: Date.now(), errorMessage: 'mesh_disconnected' }, false, false));
+    this.mediaStates = this.mediaStates.map((state: DeviceMediaState): DeviceMediaState => {
+      const result: MediaProbeResult = {
+        state: 'unknown',
+        checkedAt: Date.now(),
+        services: [],
+        errorMessage: 'mesh_disconnected'
+      };
+      const updated: DeviceMediaState = {
+        peerKey: state.peerKey,
+        result: result,
+        checking: false,
+        launching: false
+      };
+      return updated;
+    });
+  }
+
+  private ensureStreamingServices(): void {
+    if (this.sunshineProbeService !== undefined && this.peerPathService !== undefined &&
+      this.moonlightLauncher !== undefined) {
+      return;
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.sunshineProbeService = new SunshineProbeService(context);
+    this.peerPathService = new PeerPathService(context);
+    this.moonlightLauncher = new MoonlightLauncher(context);
+  }
+
+  private ensureMediaServices(): void {
+    if (this.mediaServiceProbeService !== undefined && this.hosPlayerLauncher !== undefined) {
+      return;
+    }
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.mediaServiceProbeService = new MediaServiceProbeService(context);
+    this.hosPlayerLauncher = new HosPlayerLauncher(context);
+  }
+
+  private mediaState(peerKey: string): DeviceMediaState {
+    if (this.fakeMediaServiceOnline) {
+      const peer: PeerSummary | undefined = this.peers.find((item: PeerSummary) => item.key === peerKey);
+      const host: string = peer === undefined ? '100.64.0.1' :
+        this.primaryTailscaleAddress(peer.addresses);
+      return {
+        peerKey: peerKey,
+        result: {
+          state: 'available',
+          checkedAt: Date.now(),
+          services: [{
+            type: 'jellyfin',
+            name: 'Jellyfin（工程伪装）',
+            url: `http://${host.length > 0 ? host : '100.64.0.1'}:8096`,
+            latencyMs: 1
+          }]
+        },
+        checking: false,
+        launching: false
+      };
+    }
+    const existing: DeviceMediaState | undefined = this.mediaStates.find(
+      (state: DeviceMediaState) => state.peerKey === peerKey);
+    if (existing !== undefined) {
+      return existing;
+    }
+    return {
+      peerKey: peerKey,
+      result: { state: 'unknown', checkedAt: 0, services: [] },
+      checking: false,
+      launching: false
+    };
+  }
+
+  private mediaServiceNames(peerKey: string): string {
+    return this.mediaState(peerKey).result.services.map((service: DiscoveredMediaService) => {
+      if (service.type === 'jellyfin') return 'Jellyfin';
+      if (service.type === 'emby') return 'Emby';
+      if (service.type === 'plex') return 'Plex';
+      if (service.type === 'webdav') return 'WebDAV';
+      return 'SMB';
+    }).join(' · ');
+  }
+
+  private peerServiceBadgesVisible(peer: PeerSummary): boolean {
+    const sunshineState: string = this.streamingState(peer.key).sunshine.state;
+    return sunshineState === 'checking' || sunshineState === 'available' ||
+      this.mediaState(peer.key).checking || this.mediaServiceNames(peer.key).length > 0;
+  }
+
+  private updateMediaState(peerKey: string, update: DeviceMediaState): void {
+    const index: number = this.mediaStates.findIndex(
+      (state: DeviceMediaState) => state.peerKey === peerKey);
+    if (index < 0) {
+      this.mediaStates = this.mediaStates.concat(update);
+      return;
+    }
+    const next: DeviceMediaState[] = this.mediaStates.slice();
+    next[index] = update;
+    this.mediaStates = next;
+  }
+
+  private detectMediaForPeer(peer: PeerSummary, force: boolean): void {
+    if (!peer.online || peer.addresses.length === 0 || !this.isConnected()) {
+      this.showToast('请先连接 MeshArc，并确认目标设备在线。');
+      return;
+    }
+    this.ensureMediaServices();
+    this.ensureStreamingServices();
+    const requestId: number = Date.now();
+    this.mediaRequestIds.set(peer.key, requestId);
+    const previous: DeviceMediaState = this.mediaState(peer.key);
+    this.updateMediaState(peer.key, {
+      peerKey: peer.key,
+      result: {
+        state: 'checking',
+        checkedAt: Date.now(),
+        services: previous.result.services
+      },
+      checking: true,
+      launching: previous.launching
+    });
+    this.recordDiagnosticEvent('media_probe_start', 'requested');
+    Promise.all([
+      this.mediaServiceProbeService!.probe(peer.key, true, force),
+      this.peerPathService!.probe(peer.key, true, force)
+    ]).then((results: [MediaProbeResult, PeerPathResult]) => {
+      if (this.mediaRequestIds.get(peer.key) !== requestId || !this.isConnected()) {
+        return;
+      }
+      const currentPeer: PeerSummary | undefined = this.peers.find(
+        (item: PeerSummary) => item.key === peer.key && item.online);
+      if (currentPeer === undefined) {
+        return;
+      }
+      const mediaResult: MediaProbeResult = results[0];
+      const path: PeerPathResult = results[1];
+      const streamState: DeviceStreamingState = this.streamingState(peer.key);
+      this.updateStreamingState(peer.key,
+        this.copyStreamingState(streamState, undefined, path, false, false));
+      this.updateMediaState(peer.key, {
+        peerKey: peer.key,
+        result: mediaResult,
+        checking: false,
+        launching: false
+      });
+      this.recordDiagnosticEvent(mediaResult.services.length > 0 ?
+        'media_probe_success' : 'media_probe_no_service', path.type);
+      mediaResult.services.forEach((service: DiscoveredMediaService) => {
+        this.recordDiagnosticEvent('media_service_detected', service.type);
+      });
+    }).catch(() => {
+      if (this.mediaRequestIds.get(peer.key) !== requestId) {
+        return;
+      }
+      this.updateMediaState(peer.key, {
+        peerKey: peer.key,
+        result: {
+          state: 'error',
+          checkedAt: Date.now(),
+          services: [],
+          errorMessage: 'probe_failed'
+        },
+        checking: false,
+        launching: false
+      });
+      this.recordDiagnosticEvent('media_probe_failed', 'exception');
+    });
+  }
+
+  private detectStreamingForPeer(peer: PeerSummary, force: boolean): void {
+    if (!this.isSunshineCandidate(peer) || !this.isConnected()) {
+      return;
+    }
+    this.ensureStreamingServices();
+    const requestId: number = Date.now();
+    this.streamingRequestIds.set(peer.key, requestId);
+    const previous: DeviceStreamingState = this.streamingState(peer.key);
+    const checkingPath: PeerPathResult = {
+      type: previous.path.type,
+      latencyMs: previous.path.latencyMs,
+      relayRegion: previous.path.relayRegion,
+      checkedAt: Date.now(),
+      errorMessage: previous.path.errorMessage
+    };
+    this.updateStreamingState(peer.key, this.copyStreamingState(previous,
+      { state: 'checking', checkedAt: Date.now() }, checkingPath, true));
+    const host: string = this.primaryTailscaleAddress(peer.addresses);
+    Promise.all([
+      this.sunshineProbeService!.probe(peer.key, host, true, force),
+      this.peerPathService!.probe(peer.key, true, force)
+    ]).then((results: [SunshineProbeResult, PeerPathResult]) => {
+      const sunshine: SunshineProbeResult = results[0];
+      const path: PeerPathResult = results[1];
+      const currentPeer: PeerSummary | undefined = this.peers.find((item: PeerSummary) => item.key === peer.key);
+      if (this.streamingRequestIds.get(peer.key) !== requestId || currentPeer === undefined || !currentPeer.online ||
+        !this.isConnected()) {
+        return;
+      }
+      const current: DeviceStreamingState = this.streamingState(peer.key);
+      this.updateStreamingState(peer.key, this.copyStreamingState(current, sunshine, path, false));
+      this.recordDiagnosticEvent(sunshine.state === 'available' ? 'sunshine_probe_success' :
+        sunshine.state === 'timeout' ? 'sunshine_probe_timeout' : 'sunshine_probe_failed', sunshine.state);
+      this.recordDiagnosticEvent('peer_path_result', path.type);
+    }).catch(() => {
+      if (this.streamingRequestIds.get(peer.key) !== requestId) {
+        return;
+      }
+      const current: DeviceStreamingState = this.streamingState(peer.key);
+      this.updateStreamingState(peer.key, this.copyStreamingState(current,
+        { state: 'error', checkedAt: Date.now(), errorMessage: 'probe_failed' },
+        { type: 'unknown', checkedAt: Date.now(), errorMessage: 'probe_failed' }, false));
+      this.recordDiagnosticEvent('sunshine_probe_failed', 'exception');
+    });
+    this.recordDiagnosticEvent('sunshine_probe_start', 'requested');
+    this.recordDiagnosticEvent('peer_path_probe_start', 'requested');
+  }
+
+  private streamReachable(state: DeviceStreamingState): boolean {
+    return state.path.type !== 'unreachable';
+  }
+
+  private sendFileToPeer(peer: PeerSummary): void {
+    const target: TaildropTargetSummary | undefined = this.taildropTargets.find(
+      (item: TaildropTargetSummary) => item.key === peer.key && item.online);
+    if (target === undefined) {
+      this.showToast($r('app.string.transfer_send_target_unavailable'));
+      return;
+    }
+    this.selectTaildropDocuments(target).catch(() => this.handleTaildropSelectionFailure());
+  }
+
+  private launchRemoteStream(peer: PeerSummary): void {
+    if (!this.isConnected()) {
+      this.showToast('请先连接 MeshArc，再使用远程串流。');
+      return;
+    }
+    if (!peer.online) {
+      this.showToast('目标设备当前离线。');
+      return;
+    }
+    const state: DeviceStreamingState = this.streamingState(peer.key);
+    if (state.launching) {
+      return;
+    }
+    this.updateStreamingState(peer.key, this.copyStreamingState(state, undefined, undefined, undefined, true));
+    this.detectStreamingForPeer(peer, true);
+    const launchStartedAt: number = Date.now();
+    const waitForProbe = (): void => {
+      const latest: DeviceStreamingState = this.streamingState(peer.key);
+      if (latest.checking) {
+        if (!this.isConnected() || Date.now() - launchStartedAt > 5000) {
+          this.updateStreamingState(peer.key, this.copyStreamingState(latest, undefined, undefined, false, false));
+          this.showToast('Sunshine 检测超时，请检查目标电脑防火墙或网络状态。');
+          return;
+        }
+        setTimeout(waitForProbe, 120);
+        return;
+      }
+      this.completeStreamLaunch(peer, latest);
+    };
+    setTimeout(waitForProbe, 0);
+  }
+
+  private completeStreamLaunch(peer: PeerSummary, state: DeviceStreamingState): void {
+    if (state.sunshine.state !== 'available') {
+      this.updateStreamingState(peer.key, this.copyStreamingState(state, undefined, undefined, undefined, false));
+      this.showToast(state.sunshine.state === 'timeout' ? 'Sunshine 检测超时，请检查目标电脑防火墙或网络状态。' :
+        '未检测到可用的 Sunshine 服务，请确认电脑已启动 Sunshine。');
+      return;
+    }
+    if (!this.streamReachable(state)) {
+      this.updateStreamingState(peer.key, this.copyStreamingState(state, undefined, undefined, undefined, false));
+      this.showToast('当前无法访问目标设备。');
+      return;
+    }
+    if (state.path.type === 'derp') {
+      this.showDerpStreamConfirmation(peer, state);
+      return;
+    }
+    this.openMoonlight(peer, state, false);
+  }
+
+  private showDerpStreamConfirmation(peer: PeerSummary, state: DeviceStreamingState): void {
+    this.getUIContext().showAlertDialog({
+      title: '当前通过 DERP 中继连接',
+      message: '中继连接可能导致延迟升高或画面卡顿。MeshArc 将建议 MoonlightOH 使用较低码率。',
+      autoCancel: true,
+      primaryButton: { value: '使用兼容配置', action: () => this.openMoonlight(peer, state, false) },
+      secondaryButton: { value: '使用原有配置', action: () => this.openMoonlight(peer, state, true) }
+    });
+  }
+
+  private openMoonlight(peer: PeerSummary, state: DeviceStreamingState, useOriginalProfile: boolean): void {
+    this.ensureStreamingServices();
+    const host: string = this.primaryTailscaleAddress(peer.addresses);
+    this.recordDiagnosticEvent('moonlight_launch_attempt', state.path.type);
+    this.moonlightLauncher!.isAvailable().then((available: boolean) => {
+      if (!available) {
+        this.updateStreamingState(peer.key, this.copyStreamingState(this.streamingState(peer.key),
+          undefined, undefined, undefined, false));
+        this.getUIContext().showAlertDialog({
+          title: '需要 MoonlightOH',
+          message: 'MeshArc 使用 MoonlightOH 连接 Sunshine 串流服务。',
+          autoCancel: true,
+          primaryButton: { value: '取消', action: () => {} },
+          secondaryButton: { value: '复制主机地址', action: () => this.copyDeviceValue(host, $r('app.string.peer_ip_copied')) }
+        });
+        return;
+      }
+      const originalProfile: StreamLaunchProfile = { profileName: 'default', allowUserOverride: true };
+      const profile = useOriginalProfile ? originalProfile : buildStreamProfile(state.path);
+      return this.moonlightLauncher!.launch({
+        protocolVersion: 1,
+        action: 'openHost',
+        source: 'MeshArc',
+        host: host,
+        displayName: peer.name,
+        dnsName: peer.name,
+        pathType: state.path.type,
+        relayRegion: state.path.relayRegion,
+        latencyMs: state.path.latencyMs,
+        streamProfile: profile
+      }).then(() => {
+        this.updateStreamingState(peer.key, this.copyStreamingState(this.streamingState(peer.key),
+          undefined, undefined, undefined, false));
+        this.recordDiagnosticEvent('moonlight_launch_success', state.path.type);
+      });
+    }).catch(() => {
+      this.updateStreamingState(peer.key, this.copyStreamingState(this.streamingState(peer.key),
+        undefined, undefined, undefined, false));
+      this.recordDiagnosticEvent('moonlight_launch_failed', state.path.type);
+      this.showToast('无法打开 MoonlightOH，请稍后重试。');
+    });
+  }
+
+  private launchMediaForPeer(peer: PeerSummary): void {
+    const state: DeviceMediaState = this.mediaState(peer.key);
+    if (state.checking || state.launching) {
+      return;
+    }
+    if (state.result.services.length === 0) {
+      this.detectMediaForPeer(peer, true);
+      return;
+    }
+    const service: DiscoveredMediaService = state.result.services[0];
+    this.openHosPlayer(peer, service);
+  }
+
+  private openHosPlayer(peer: PeerSummary, service: DiscoveredMediaService): void {
+    this.ensureMediaServices();
+    const state: DeviceMediaState = this.mediaState(peer.key);
+    const path: PeerPathResult = this.streamingState(peer.key).path;
+    this.updateMediaState(peer.key, {
+      peerKey: peer.key,
+      result: state.result,
+      checking: false,
+      launching: true
+    });
+    this.recordDiagnosticEvent('hosplayer_launch_attempt', service.type);
+    try {
+      const request: HosPlayerLaunchRequest = {
+        protocolVersion: 1,
+        action: 'add',
+        type: service.type,
+        url: service.url,
+        name: `${this.peerDisplayName(peer.name)} · ${service.name}`,
+        network: 'tailnet',
+        route: path.type,
+        source: 'mesharc'
+      };
+      const prototypeUri: string = this.hosPlayerLauncher!.buildUri(request);
+      if (!this.hosPlayerLauncher!.isEnabled()) {
+        this.updateMediaState(peer.key, {
+          peerKey: peer.key,
+          result: state.result,
+          checking: false,
+          launching: false
+        });
+        this.recordDiagnosticEvent('hosplayer_contract_previewed', service.type);
+        this.getUIContext().showAlertDialog({
+          title: 'HosPlayer 联动协议原型',
+          message: `已识别 ${service.name}。当前原型会传递服务类型、服务器地址、设备名称和网络路径；` +
+            '不包含用户名、密码或访问令牌。等待 HosPlayer 发布正式接收协议后即可直接拉起。',
+          autoCancel: true,
+          primaryButton: { value: '关闭', action: () => {} },
+          secondaryButton: {
+            value: '复制参数链接',
+            action: () => this.copyPlainText(prototypeUri, 'HosPlayer 参数原型已复制')
+          }
+        });
+        return;
+      }
+      this.hosPlayerLauncher!.launch(request).then(() => {
+        this.updateMediaState(peer.key, {
+          peerKey: peer.key,
+          result: this.mediaState(peer.key).result,
+          checking: false,
+          launching: false
+        });
+        this.recordDiagnosticEvent('hosplayer_launch_success', service.type);
+      }).catch(() => {
+        this.updateMediaState(peer.key, {
+          peerKey: peer.key,
+          result: this.mediaState(peer.key).result,
+          checking: false,
+          launching: false
+        });
+        this.recordDiagnosticEvent('hosplayer_launch_failed', service.type);
+        this.showToast('无法打开 HosPlayer，请稍后重试。');
+      });
+    } catch (_error) {
+      this.updateMediaState(peer.key, {
+        peerKey: peer.key,
+        result: state.result,
+        checking: false,
+        launching: false
+      });
+      this.recordDiagnosticEvent('hosplayer_contract_rejected', service.type);
+      this.showToast('服务器地址不符合安全传参规则。');
+    }
+  }
+
+  private copyPlainText(value: string, successMessage: string): void {
+    const data: pasteboard.PasteData = pasteboard.createData(
+      pasteboard.MIMETYPE_TEXT_PLAIN, value);
+    pasteboard.getSystemPasteboard().setData(data)
+      .then(() => this.showToast(successMessage))
+      .catch(() => this.showToast($r('app.string.device_copy_failed')));
+  }
+
+  private runMediaIntegrationSelfTest(): void {
+    if (this.mediaSelfTestInProgress) {
+      return;
+    }
+    this.ensureMediaServices();
+    this.mediaSelfTestInProgress = true;
+    this.mediaSelfTestStatus = '正在运行离线测试…';
+    this.recordDiagnosticEvent('media_self_test_started', 'offline');
+    nativeBridge.mediaProbeSelfTestAsync().then((resultText: string) => {
+      const nativeResult: MediaProbeSelfTestResult =
+        JSON.parse(resultText) as MediaProbeSelfTestResult;
+      const contractResult: string = this.hosPlayerLauncher!.runOfflineSelfTest();
+      const passed: boolean = nativeResult.state === 'passed' &&
+        nativeResult.cases === 4 && contractResult.startsWith('PASS');
+      this.mediaSelfTestStatus = passed ?
+        'PASS · 媒体服务识别 4/4 · HosPlayer 参数协议通过' :
+        'FAILED · 请导出诊断报告并检查媒体联动日志';
+      this.recordDiagnosticEvent(passed ? 'media_self_test_passed' :
+        'media_self_test_failed', 'offline');
+    }).catch(() => {
+      this.mediaSelfTestStatus = 'FAILED · 无法运行媒体服务离线测试';
+      this.recordDiagnosticEvent('media_self_test_failed', 'native_bridge');
+    }).finally(() => {
+      this.mediaSelfTestInProgress = false;
+    });
+  }
+
+  private copyHosPlayerPrototype(): void {
+    this.ensureMediaServices();
+    try {
+      const result: string = this.hosPlayerLauncher!.runOfflineSelfTest();
+      const separator: number = result.indexOf(' | ');
+      if (separator < 0) {
+        throw new Error('prototype_unavailable');
+      }
+      this.copyPlainText(result.substring(separator + 3), 'HosPlayer 参数原型已复制');
+      this.recordDiagnosticEvent('hosplayer_contract_copied', 'offline');
+    } catch (_error) {
+      this.showToast('无法生成 HosPlayer 参数原型。');
+      this.recordDiagnosticEvent('hosplayer_contract_failed', 'offline');
+    }
   }
 
   private copyDeviceValue(value: string, successMessage: ResourceStr): void {
@@ -4083,19 +4781,19 @@ export struct BridgeStatus {
     }) {
       if (this.connectionActionLoading()) {
         LoadingProgress()
-          .width(22)
-          .height(22)
+          .width(19)
+          .height(19)
           .color(this.connectionActionForeground())
       } else {
         Image($r('app.media.connection_filled'))
-          .width(22)
-          .height(22)
+          .width(19)
+          .height(19)
           .fillColor(this.connectionActionForeground())
       }
     }
     .id(this.connectionActionNodeId())
-    .width(48)
-    .height(48)
+    .width(42)
+    .height(42)
     .backgroundColor(this.connectionActionBackground())
     .enabled(this.connectionActionEnabled())
     .opacity(this.connectionActionEnabled() ? 1 : 0.65)
@@ -4131,6 +4829,32 @@ export struct BridgeStatus {
     .clip(true)
     .backgroundColor(this.secondaryBackground())
     .borderRadius(12)
+  }
+
+  @Builder
+  private TrafficChartBackdrop() {
+    Stack({ alignContent: Alignment.Center }) {
+      Polyline({ width: this.trafficChartWidth(), height: 42 })
+        .points(this.trafficChartPoints(true, 42))
+        .fill(Color.Transparent)
+        .stroke($r('sys.color.icon_emphasize'))
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+        .opacity(0.20)
+      Polyline({ width: this.trafficChartWidth(), height: 42 })
+        .points(this.trafficChartPoints(false, 42))
+        .fill(Color.Transparent)
+        .stroke('#8B5CF6')
+        .strokeWidth(2)
+        .strokeLineCap(LineCapStyle.Round)
+        .strokeLineJoin(LineJoinStyle.Round)
+        .opacity(0.18)
+    }
+    .width('100%')
+    .height(42)
+    .clip(true)
+    .hitTestBehavior(HitTestMode.None)
   }
 
   @Builder
@@ -4223,6 +4947,94 @@ export struct BridgeStatus {
   }
 
   @Builder
+  private InactiveHomeHeader() {
+    this.CompactHomeHeader(false)
+  }
+
+  @Builder
+  private LegacyConnectedHeader() {
+    LegacyConnectedHomeHeader({
+      connectionPanel: (): void => { this.ConnectionPanel(); },
+      exitNodePanel: (): void => { this.ExitNodePanel(); }
+    })
+  }
+
+  @Builder
+  private CompactConnectedHeader() {
+    this.CompactHomeHeader(true)
+  }
+
+  private compactConnectionDescription(connected: boolean): ResourceStr {
+    if (!connected) {
+      return this.connectionDescription();
+    }
+    const tailnetName: string = this.accountSummary.tailnetName;
+    const tailscaleAddress: string = this.primaryTailscaleAddress(this.accountSummary.addresses);
+    if (tailnetName.length === 0) {
+      return tailscaleAddress;
+    }
+    return tailscaleAddress.length === 0 ? tailnetName : `${tailnetName} \u00B7 ${tailscaleAddress}`;
+  }
+
+  private compactExitNodeLabel(connected: boolean): ResourceStr {
+    const selectedName: string = this.selectedExitNodeName();
+    if (!connected) {
+      return this.selectedExitNodeLabel();
+    }
+    return selectedName.length > 0 ? selectedName :
+      '\u672A\u4F7F\u7528 \u00B7 \u65AD\u5F00\u540E\u53EF\u66F4\u6539';
+  }
+
+  @Builder
+  private CompactHomeHeader(connected: boolean) {
+    CompactConnectedHomeHeader({
+      statusTitle: this.connectionTitle(),
+      statusDescription: this.compactConnectionDescription(connected),
+      statusColor: this.connectionColor(),
+      downloadRate: this.formatTrafficBytes(this.trafficDownloadRate, true),
+      uploadRate: this.formatTrafficBytes(this.trafficUploadRate, true),
+      showTraffic: connected,
+      exitNodeLabel: this.compactExitNodeLabel(connected),
+      exitNodeEditable: !connected,
+      exitNodeEnabled: this.isAuthenticated() && this.exitNodes.length > 0 &&
+        !this.isConnected() && !this.isConnecting() && !this.connectInProgress,
+      exitNodeOptions: this.exitNodeSelectOptions(),
+      exitNodeSelectedIndex: this.selectedExitNodeIndex(),
+      onDetails: (): void => { this.openConnectionDetails(); },
+      onExitNodeInfo: (): void => { this.showExitNodeConnectionHint(); },
+      onExitNodeSelect: (index: number): void => { this.onExitNodeSelect(index); },
+      connectionButton: (): void => { this.ConnectionCircleButton(); },
+      trafficBackdrop: (): void => { this.TrafficChartBackdrop(); }
+    })
+  }
+
+  @Builder
+  private HomeConnectionHeader() {
+    HomeConnectionSection({
+      connected: this.connectedHomeLayoutActive(),
+      layoutMode: this.connectedHomeLayoutMode,
+      inactiveHeader: (): void => { this.InactiveHomeHeader(); },
+      legacyHeader: (): void => { this.LegacyConnectedHeader(); },
+      compactHeader: (): void => { this.CompactConnectedHeader(); }
+    })
+  }
+
+  @Builder
+  private ConnectionDetailsContent() {
+    ConnectionDetailsSheet({
+      tailnetName: this.accountSummary.tailnetName,
+      deviceName: this.localDeviceName(),
+      tailscaleAddress: this.primaryTailscaleAddress(this.accountSummary.addresses),
+      duration: this.connectedDurationLabel(),
+      downloadRate: this.formatTrafficBytes(this.trafficDownloadRate, true),
+      uploadRate: this.formatTrafficBytes(this.trafficUploadRate, true),
+      downloadTotal: this.formatTrafficBytes(this.trafficDownloadBytes),
+      uploadTotal: this.formatTrafficBytes(this.trafficUploadBytes),
+      exitNodeName: this.selectedExitNodeName()
+    })
+  }
+
+  @Builder
   private NetworkSettingsPanel() {
     Column({ space: 0 }) {
       Row() {
@@ -4241,29 +5053,6 @@ export struct BridgeStatus {
           .enabled(!this.isConnected() && this.isAuthenticated())
           .opacity(!this.isConnected() && this.isAuthenticated() ? 1 : 0.4)
           .onChange((enabled: boolean) => this.setNetworkSetting('routeAll', enabled))
-      }
-      .width('100%')
-      .constraintSize({ minHeight: 56 })
-      .padding({ top: 6, bottom: 6 })
-
-      Divider().color($r('sys.color.comp_divider'))
-
-      Row() {
-        Column({ space: 2 }) {
-          Text($r('app.string.setting_magicdns'))
-            .fontSize(14)
-            .fontColor($r('sys.color.font_primary'))
-          Text($r('app.string.setting_magicdns_description'))
-            .fontSize(12)
-            .fontColor($r('sys.color.font_secondary'))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        Toggle({ type: ToggleType.Switch, isOn: this.networkSettings.corpDNS })
-          .id('tailscale-dns-toggle')
-          .enabled(!this.isConnected() && this.isAuthenticated())
-          .opacity(!this.isConnected() && this.isAuthenticated() ? 1 : 0.4)
-          .onChange((enabled: boolean) => this.setNetworkSetting('corpDNS', enabled))
       }
       .width('100%')
       .constraintSize({ minHeight: 56 })
@@ -4414,7 +5203,7 @@ export struct BridgeStatus {
       .alignItems(HorizontalAlign.Start)
 
       Select(this.exitNodeSelectOptions())
-        .id('exit-node-status')
+        .id('legacy-exit-node-status')
         .selected(this.selectedExitNodeIndex())
         .value(this.selectedExitNodeLabel())
         .controlSize(ControlSize.NORMAL)
@@ -4503,8 +5292,8 @@ export struct BridgeStatus {
     Row({ space: 10 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
         Image(this.localDeviceIcon())
-          .width(22)
-          .height(22)
+          .width(19)
+          .height(19)
           .fillColor($r('sys.color.icon_primary'))
         Row()
           .width(8)
@@ -4623,8 +5412,8 @@ export struct BridgeStatus {
       Row({ space: 10 }) {
         Stack({ alignContent: Alignment.BottomEnd }) {
           Image(this.peerDeviceIcon(peer.deviceType))
-            .width(22)
-            .height(22)
+          .width(19)
+          .height(19)
             .fillColor($r('sys.color.icon_primary'))
           Row()
             .width(8)
@@ -4640,15 +5429,13 @@ export struct BridgeStatus {
         .borderRadius(11)
         .backgroundColor(this.secondaryBackground())
         Column({ space: 1 }) {
-          Text(peer.name)
+          Text(this.peerDisplayName(peer.name))
             .fontSize(14)
             .fontColor($r('sys.color.font_primary'))
             .fontWeight(FontWeight.Medium)
-            .maxLines(this.isPeerNameExpanded(peer.key) ? 6 : 2)
+            .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .wordBreak(WordBreak.BREAK_ALL)
             .width('100%')
-            .onClick(() => this.togglePeerName(peer.key))
           Row({ space: 5 }) {
             Text(peer.online ? $r('app.string.peer_online') : $r('app.string.peer_offline'))
               .fontSize(12)
@@ -4672,6 +5459,17 @@ export struct BridgeStatus {
               .maxLines(1)
               .width('100%')
           }
+          if (this.peerServiceBadgesVisible(peer)) {
+            Row({ space: 5 }) {
+              SunshineStatusBadge({ state: this.streamingState(peer.key).sunshine.state })
+              MediaStatusBadge({
+                state: this.mediaState(peer.key).result.state,
+                serviceNames: this.mediaServiceNames(peer.key)
+              })
+            }
+            .width('100%')
+            .margin({ top: 3 })
+          }
           if (peer.keyExpired || this.keyExpiresSoon(peer.keyExpiryUnixMs)) {
             Row() {
               this.DeviceStatusNotice(this.keyExpiryLabel(peer.keyExpired,
@@ -4688,70 +5486,46 @@ export struct BridgeStatus {
           .fontColor([$r('sys.color.icon_secondary')])
           .rotate({ angle: this.isPeerNameExpanded(peer.key) ? 180 : 0 })
           .animation({ duration: 260, curve: Curve.EaseInOut })
-          .onClick(() => this.togglePeerName(peer.key))
       }
       .width('100%')
       .constraintSize({ minHeight: 52 })
       .padding({ top: 6, right: 12, bottom: 6 })
+      .onClick(() => this.togglePeer(peer))
       if (this.isPeerNameExpanded(peer.key)) {
         Column({ space: 8 }) {
-          Row({ space: 0 }) {
-            this.PeerActionSegment(
-              this.peerConnectivityInProgress && this.peerConnectivityKey === peer.key ?
-                $r('app.string.peer_connectivity_testing') :
-                $r('app.string.peer_connectivity_action'),
-              'peer-connectivity-' + peer.key,
-              peer.online && !this.peerConnectivityInProgress,
-              this.peerConnectivityInProgress && this.peerConnectivityKey === peer.key,
-              () => this.startPeerConnectivity(peer))
-            Divider()
-              .vertical(true)
-              .height(18)
-              .color($r('sys.color.comp_divider'))
-            this.PeerActionSegment($r('app.string.peer_copy_dns'), 'peer-copy-dns-' + peer.key,
-              peer.name.length > 0, false,
-              () => this.copyDeviceValue(peer.name, $r('app.string.peer_dns_copied')))
-            Divider()
-              .vertical(true)
-              .height(18)
-              .color($r('sys.color.comp_divider'))
-            this.PeerActionSegment($r('app.string.peer_copy_ip'), 'peer-copy-ip-' + peer.key,
-              peer.addresses.length > 0, false,
-              () => this.copyDeviceValue(this.primaryTailscaleAddress(peer.addresses),
-                $r('app.string.peer_ip_copied')))
-          }
-          .width('100%')
-          .height(36)
-          .alignItems(VerticalAlign.Center)
-          .backgroundColor(this.secondaryBackground())
-          .borderRadius(18)
-          .clip(true)
-
-          if (this.peerConnectivityKey === peer.key && !this.peerConnectivityInProgress &&
-            this.peerConnectivityResult.state.length > 0) {
-            if (this.peerConnectivityResult.state === 'reachable' ||
-              this.peerConnectivityResult.state === 'degraded') {
-              Text($r('app.string.peer_connectivity_summary',
-                this.peerConnectivityResult.received, this.peerConnectivityResult.sent,
-                this.peerConnectivityResult.avgLatencyMs, this.peerConnectivityResult.lossPercent))
-                .id('peer-connectivity-result-success')
-                .fontSize(12)
-                .fontColor(this.peerConnectivityResult.state === 'reachable' ?
-                  $r('app.color.status_success') : $r('sys.color.font_secondary'))
-                .width('100%')
-              Text($r('app.string.peer_connectivity_latency_range',
-                this.peerConnectivityResult.minLatencyMs, this.peerConnectivityResult.maxLatencyMs))
-                .fontSize(11)
-                .fontColor($r('sys.color.font_secondary'))
-                .width('100%')
-            } else {
-              Text(this.peerConnectivityReason(this.peerConnectivityResult.reason))
-                .id('peer-connectivity-result-error')
-                .fontSize(12)
-                .fontColor(this.peerConnectivityResult.state === 'failed' ?
-                  $r('app.color.status_error') : $r('sys.color.font_secondary'))
-                .width('100%')
+          if (peer.online && peer.addresses.length > 0) {
+            DeviceConnectionInfoPanel({
+              path: this.streamingState(peer.key).path,
+              sunshine: this.streamingState(peer.key).sunshine,
+              media: this.mediaState(peer.key).result,
+              checking: this.streamingState(peer.key).checking,
+              onRefresh: () => this.refreshPeerServices(peer)
+            })
+            DeviceActionButtons({
+              sunshineState: this.streamingState(peer.key).sunshine.state,
+              reachable: this.streamReachable(this.streamingState(peer.key)),
+              meshConnected: this.isConnected(),
+              launching: this.streamingState(peer.key).launching,
+              showStreaming: this.isSunshineCandidate(peer),
+              mediaState: this.mediaState(peer.key).result.state,
+              mediaCount: this.mediaState(peer.key).result.services.length,
+              mediaChecking: this.mediaState(peer.key).checking,
+              mediaLaunching: this.mediaState(peer.key).launching,
+              onStream: () => this.launchRemoteStream(peer),
+              onDetectMedia: () => this.detectMediaForPeer(peer, true),
+              onMedia: () => this.launchMediaForPeer(peer),
+              onCopyIp: () => this.copyDeviceValue(this.primaryTailscaleAddress(peer.addresses),
+                $r('app.string.peer_ip_copied'))
+            })
+          } else {
+            Row({ space: 0 }) {
+              this.PeerActionSegment($r('app.string.peer_copy_ip'), 'peer-copy-ip-' + peer.key,
+                peer.addresses.length > 0, false,
+                () => this.copyDeviceValue(this.primaryTailscaleAddress(peer.addresses),
+                  $r('app.string.peer_ip_copied')))
             }
+            .width('100%').height(36).alignItems(VerticalAlign.Center)
+            .backgroundColor(this.secondaryBackground()).borderRadius(18).clip(true)
           }
         }
         .width('100%')
@@ -4801,6 +5575,42 @@ export struct BridgeStatus {
     .borderRadius(16)
     .clip(true)
     .animation({ duration: 260, curve: Curve.EaseInOut })
+  }
+
+  @Builder
+  private HomeLayoutSettingsPanel() {
+    Row({ space: 10 }) {
+      Column({ space: 3 }) {
+        Text('主页连接布局')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('sys.color.font_primary'))
+        Text('经典布局会恢复原有连接卡片、流量图和出口节点卡片。')
+          .fontSize(11)
+          .fontColor($r('sys.color.font_secondary'))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      Select([{ value: '紧凑布局' }, { value: '经典布局' }])
+        .id('connected-home-layout-select')
+        .selected(this.connectedHomeLayoutMode === ConnectedHomeLayoutMode.COMPACT ? 0 : 1)
+        .value(this.connectedHomeLayoutMode === ConnectedHomeLayoutMode.COMPACT ? '紧凑布局' : '经典布局')
+        .font({ size: 12 })
+        .optionFont({ size: 12 })
+        .controlSize(ControlSize.SMALL)
+        .constraintSize({ minWidth: 100, maxWidth: 116 })
+        .onSelect((index: number) => this.setConnectedHomeLayoutMode(index === 0 ?
+          ConnectedHomeLayoutMode.COMPACT : ConnectedHomeLayoutMode.LEGACY))
+    }
+    .id('connected-home-layout-settings')
+    .width('100%')
+    .constraintSize({ minHeight: 64 })
+    .padding(12)
+    .backgroundColor(this.groupBackground())
+    .borderRadius(12)
   }
 
   @Builder
@@ -5158,9 +5968,6 @@ export struct BridgeStatus {
       this.DiagnosticStatus('Control Plane', this.backendStatus, 'backend-status')
       Divider().color($r('sys.color.comp_divider'))
       this.DiagnosticStatus('VPN Extension', this.vpnStatus, 'vpn-status')
-      Divider().color($r('sys.color.comp_divider'))
-      this.DiagnosticStatus('MagicDNS', this.magicDNSProbeStatus, 'magicdns-status')
-
       this.StandardActionButton('Refresh status', 'backend-refresh', false, true, () => {
         this.verifyNativeBridge();
         this.refreshBackendStatus();
@@ -5171,8 +5978,6 @@ export struct BridgeStatus {
       this.StandardActionButton('Probe control TLS', 'control-probe', false,
         this.controlServerConfirmed && this.controlServerURL === DEFAULT_CONTROL_SERVER_URL,
         () => this.runControlProbe())
-      this.StandardActionButton('Open MagicDNS probe', 'magicdns-probe', false,
-        this.magicDNSProbeUrl.startsWith('http://'), () => this.runMagicDNSProbe())
       Divider().color($r('sys.color.comp_divider'))
       Text($r('app.string.diagnostic_first_run_tools_description'))
         .fontSize(12)
@@ -5188,6 +5993,49 @@ export struct BridgeStatus {
       if (this.diagnosticActionStatus.length > 0) {
         this.DiagnosticStatus($r('app.string.diagnostic_action_status'),
           this.diagnosticActionStatus, 'diagnostic-action-status')
+      }
+      Divider().color($r('sys.color.comp_divider'))
+      Text('媒体服务联动验证')
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.font_primary'))
+        .width('100%')
+      Text('无需真实媒体服务器：使用内置响应样本验证 Jellyfin、Emby、Plex 识别，' +
+        '并检查 HosPlayer 参数链接不会包含用户名、密码或访问令牌。')
+        .fontSize(12)
+        .fontColor($r('sys.color.font_secondary'))
+        .lineHeight(18)
+        .width('100%')
+      Row({ space: 12 }) {
+        Column({ space: 2 }) {
+          Text('伪装媒体服务在线')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_primary'))
+          Text('将在线设备临时显示为 Jellyfin 可用；仅本次启动有效。')
+            .fontSize(11)
+            .fontColor($r('sys.color.font_secondary'))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.fakeMediaServiceOnline })
+          .id('diagnostic-fake-media-online')
+          .onChange((enabled: boolean) => {
+            this.fakeMediaServiceOnline = enabled;
+          })
+      }
+      .width('100%')
+      .padding({ top: 6, bottom: 6 })
+      this.StandardActionButton('运行媒体服务离线自检',
+        'diagnostic-media-self-test', false, !this.mediaSelfTestInProgress,
+        () => this.runMediaIntegrationSelfTest(), this.mediaSelfTestInProgress)
+      this.StandardActionButton('复制 HosPlayer 参数原型',
+        'diagnostic-hosplayer-contract', false, !this.mediaSelfTestInProgress,
+        () => this.copyHosPlayerPrototype())
+      if (this.mediaSelfTestStatus.length > 0) {
+        this.DiagnosticStatus('媒体联动自检',
+          this.mediaSelfTestStatus, 'diagnostic-media-self-test-status')
       }
       Divider().color($r('sys.color.comp_divider'))
       Text($r('app.string.diagnostic_report_description'))
@@ -5265,35 +6113,64 @@ export struct BridgeStatus {
 
   @Builder
   private HomeContent() {
-    Scroll(this.homeScroller) {
-      Column({ space: 12 }) {
-        this.ConnectionPanel()
-        this.ExitNodePanel()
-        if (this.isBackendLoading() || this.devicesLoading) {
-          this.DevicesLoadingPanel()
-        } else if (!this.isAuthenticated()) {
-          this.DevicesSignedOutPanel()
-        } else {
-          this.DevicesPanel()
-        }
+    Column({ space: 12 }) {
+      this.HomeConnectionHeader()
+      if (this.isBackendLoading() || this.devicesLoading) {
+        this.DevicesLoadingPanel()
+      } else if (!this.isAuthenticated()) {
+        this.DevicesSignedOutPanel()
+      } else {
+        this.DevicesPanel()
       }
-      .width('100%')
-      .constraintSize({ maxWidth: 1200 })
-      .padding({
-        left: this.contentMargin(),
-        right: this.contentMargin(),
-        top: 8,
-        bottom: this.pageBottomInset()
-      })
-      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
     .height('100%')
+    .constraintSize({ maxWidth: 1200 })
+    .padding({
+      left: this.contentMargin(),
+      right: this.contentMargin(),
+      top: 8,
+      bottom: this.pageBottomInset()
+    })
+    .alignItems(HorizontalAlign.Center)
     .backgroundColor($r('sys.color.background_secondary'))
-    .edgeEffect(EdgeEffect.Spring)
-    .scrollBar(BarState.Auto)
-    .scrollBarWidth(4)
-    .align(Alignment.TopStart)
+  }
+
+  @Builder
+  private TransferOverviewPanel() {
+    Column({ space: 12 }) {
+      Row({ space: 12 }) {
+        Stack() {
+          SymbolGlyph($r('sys.symbol.paperplane'))
+            .fontSize(26)
+            .fontColor([$r('sys.color.icon_secondary')])
+        }
+        .width(44)
+        .height(44)
+        .borderRadius(14)
+        .backgroundColor(this.secondaryBackground())
+
+        Column({ space: 3 }) {
+          Text($r('app.string.transfer_taildrop_title'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('sys.color.font_primary'))
+            .width('100%')
+          Text($r('app.string.transfer_taildrop_description'))
+            .fontSize(12)
+            .fontColor($r('sys.color.font_secondary'))
+            .lineHeight(18)
+            .width('100%')
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor(this.groupBackground())
+    .borderRadius(16)
   }
 
   @Builder
@@ -5886,6 +6763,9 @@ export struct BridgeStatus {
             this.GlowSettingsPanel()
           }
           GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
+            this.HomeLayoutSettingsPanel()
+          }
+          GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
             this.SettingsGroupHeader($r('app.string.about_title'))
           }
           GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
@@ -5915,6 +6795,14 @@ export struct BridgeStatus {
     .edgeEffect(EdgeEffect.Spring)
     .scrollBar(BarState.Auto)
     .scrollBarWidth(4)
+  }
+
+  @Builder
+  private HomeTitleTopInset() {
+    Blank()
+      .width('100%')
+      .height(this.homeTitleCompact ? 12 : 0)
+      .animation({ duration: 420, curve: Curve.EaseInOut })
   }
 
   @Builder
@@ -5966,13 +6854,14 @@ export struct BridgeStatus {
         }
       },
       content: {
+        stackBuilder: (): void => this.HomeTitleTopInset(),
         title: {
           mainTitle: $r('app.string.app_title'),
-          subTitle: $r('app.string.app_tagline')
+          subTitle: this.homeTitleCompact ? '' : $r('app.string.app_tagline')
         }
       }
     })
-    .titleMode(HdsNavigationTitleMode.FULL)
+    .titleMode(this.homeTitleCompact ? HdsNavigationTitleMode.MINI : HdsNavigationTitleMode.FULL)
     .hideBackButton(true)
     .mode(NavigationMode.Stack)
     .width('100%')
@@ -6441,9 +7330,19 @@ export struct BridgeStatus {
       height: 310,
       detents: [310],
       preferType: SheetType.BOTTOM,
+      scrollSizeMode: ScrollSizeMode.CONTINUOUS,
       dragBar: true,
       showClose: true,
       title: { title: $r('app.string.transfer_text_editor_title') }
+    })
+    .bindSheet($$this.connectionDetailsVisible, this.ConnectionDetailsContent(), {
+      height: '68%',
+      detents: ['68%', SheetSize.LARGE],
+      preferType: SheetType.BOTTOM,
+      scrollSizeMode: ScrollSizeMode.CONTINUOUS,
+      dragBar: true,
+      showClose: true,
+      title: { title: '连接详情' }
     })
   }
 }
