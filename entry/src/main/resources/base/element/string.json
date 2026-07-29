@@ -121,6 +121,18 @@
       "value": "Send text"
     },
     {
+      "name": "transfer_text_preview_title",
+      "value": "Text preview"
+    },
+    {
+      "name": "transfer_preview_action",
+      "value": "Preview"
+    },
+    {
+      "name": "transfer_collapse_action",
+      "value": "Collapse"
+    },
+    {
       "name": "transfer_text_placeholder",
       "value": "Enter the text to send"
     },
@@ -187,6 +199,14 @@
     {
       "name": "transfer_receive_failed",
       "value": "Could not save the received file. Try again."
+    },
+    {
+      "name": "transfer_save_timeout",
+      "value": "Saving timed out. You can try again without restarting the app."
+    },
+    {
+      "name": "transfer_receive_cancelled",
+      "value": "Saving cancelled. You can try again."
     },
     {
       "name": "transfer_receiving_file",
@@ -390,7 +410,7 @@
     },
     {
       "name": "transfer_connect_first_description",
-      "value": "Taildrop requires an active connection before devices can exchange files."
+      "value": "Connect Tailscale to send or receive. Existing received files and transfer history remain available below."
     },
     {
       "name": "transfer_history_title",
@@ -965,12 +985,68 @@
       "value": "Could not stop the system VPN"
     },
     {
+      "name": "diagnostic_simulate_crash_action",
+      "value": "Simulate app crash"
+    },
+    {
+      "name": "diagnostic_simulate_crash_confirm_title",
+      "value": "Simulate an app crash?"
+    },
+    {
+      "name": "diagnostic_simulate_crash_confirm_message",
+      "value": "This engineering test stops the system VPN, leaves behind a fresh connected-state snapshot, and then terminates the app abnormally. After reopening, the app should verify the stale snapshot briefly and show Disconnected within about 2.5 seconds."
+    },
+    {
+      "name": "diagnostic_simulate_crash_failed",
+      "value": "Could not prepare the crash simulation"
+    },
+    {
       "name": "diagnostic_action_status",
       "value": "Engineering action"
     },
     {
       "name": "settings_appearance_title",
       "value": "Appearance"
+    },
+    {
+      "name": "settings_storage_title",
+      "value": "Storage"
+    },
+    {
+      "name": "settings_cache_title",
+      "value": "Cache"
+    },
+    {
+      "name": "settings_cache_calculating",
+      "value": "Calculating"
+    },
+    {
+      "name": "settings_cache_clearing",
+      "value": "Clearing"
+    },
+    {
+      "name": "settings_clear_cache_action",
+      "value": "Clear cache"
+    },
+    {
+      "name": "settings_clear_cache_confirm_title",
+      "value": "Clear app cache?"
+    },
+    {
+      "name": "settings_clear_cache_confirm_message",
+      "value": "This removes temporary files and pending received files. Your account, connection settings, and transfer history are not affected."
+    },
+    {
+      "name": "settings_clear_cache_busy",
+      "value": "A task is using the cache. Try again shortly."
+    },
+    {
+      "name": "settings_cache_cleared",
+      "value": "Cache cleared"
+    },
+    {
+      "name": "settings_clear_cache_failed",
+      "value": "Some cached files could not be removed. Try again later."
     }
   ]
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,12 @@ func newHarmonyTunDevice(fd, mtu int) (*harmonyTunDevice, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := unix.SetNonblock(duplicate, true); err != nil {
+	// wireguard-go's TUN reader treats any read error other than its own
+	// special cases as fatal. In particular, it closes the device on EAGAIN.
+	// Harmony's VPN descriptor may be returned as non-blocking, so explicitly
+	// clear O_NONBLOCK on our duplicate and let the reader block for the next
+	// packet. This also prevents a busy-loop while the tunnel is idle.
+	if err := unix.SetNonblock(duplicate, false); err != nil {
 		_ = unix.Close(duplicate)
 		return nil, err
 	}
@@ -60,7 +66,7 @@ func (d *harmonyTunDevice) Read(bufs [][]byte, sizes []int, offset int) (int, er
 	if len(bufs) == 0 || len(sizes) == 0 || offset < 0 || offset >= len(bufs[0]) {
 		return 0, errors.New("invalid TUN read buffer")
 	}
-	n, err := d.file.Read(bufs[0][offset:])
+	n, err := readTunPacket(d.file, bufs[0][offset:])
 	if n > 0 {
 		sizes[0] = n
 		d.readCount.Add(1)
@@ -80,19 +86,59 @@ func (d *harmonyTunDevice) Write(bufs [][]byte, offset int) (int, error) {
 		if offset < 0 || offset > len(buf) {
 			return written, errors.New("invalid TUN write buffer")
 		}
-		n, err := d.file.Write(buf[offset:])
+		packet := buf[offset:]
+		n, err := writeTunPacket(d.file, packet)
 		if err != nil {
 			if !isRetriableTunError(err) {
 				d.writeErrorCount.Add(1)
 			}
 			return written, err
 		}
-		if n > 0 {
-			d.writeCount.Add(1)
-			d.writeByteCount.Add(uint64(n))
-			d.observeDNSPacket(buf[offset:offset+n], false)
+		if n != len(packet) {
+			d.writeErrorCount.Add(1)
+			return written, io.ErrShortWrite
 		}
+		d.writeCount.Add(1)
+		d.writeByteCount.Add(uint64(n))
+		d.observeDNSPacket(packet, false)
 		written++
+	}
+	return written, nil
+}
+
+func readTunPacket(reader io.Reader, packet []byte) (int, error) {
+	for {
+		n, err := reader.Read(packet)
+		if err != nil && isRetriableTunError(err) {
+			// A blocking descriptor should not normally produce EAGAIN, but
+			// never hand a transient interruption to wireguard-go as a
+			// device-fatal read error.
+			continue
+		}
+		return n, err
+	}
+}
+
+// writeTunPacket preserves packet boundaries even when the underlying VPN
+// descriptor accepts only a partial write. A short write must never be
+// reported as a successfully written packet: doing so would silently drop
+// the rest of a decrypted TCP segment.
+func writeTunPacket(writer io.Writer, packet []byte) (int, error) {
+	written := 0
+	for written < len(packet) {
+		n, err := writer.Write(packet[written:])
+		if n > 0 {
+			written += n
+		}
+		if err != nil {
+			if isRetriableTunError(err) {
+				continue
+			}
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrNoProgress
+		}
 	}
 	return written, nil
 }

@@ -52,6 +52,7 @@ export struct ConnectionDetailsSheet {
       .width('100%')
       .layoutWeight(1)
       .edgeEffect(EdgeEffect.Spring)
+      .align(Alignment.TopStart)
     }
     .width('100%')
     .height('100%')

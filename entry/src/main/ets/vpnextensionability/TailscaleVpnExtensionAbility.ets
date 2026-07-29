@@ -197,6 +197,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private statusTimer: number = -1;
   private taildropRequestTimer: number = -1;
   private statusUpdateInFlight: boolean = false;
+  private currentVisibleStatus: string = 'VPN extension lifecycle entered';
   private backendStopWatcher?: fileIo.Watcher;
   private peerConnectivityInFlight: boolean = false;
   private sunshineProbeInFlight: boolean = false;
@@ -566,6 +567,10 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       this.processTaildropReceiveRequest();
     }, 100);
     this.statusTimer = setInterval(() => {
+      // Keep liveness independent from the full backend snapshot. File-target
+      // and inbox queries can occasionally take several seconds, but that does
+      // not mean the HarmonyOS VPN connection or its TUN has stopped.
+      this.writeCurrentStatusHeartbeat();
       if (this.statusUpdateInFlight || this.backendStopInFlight) {
         return;
       }
@@ -1228,8 +1233,13 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   }
 
   private writeStatus(status: string): void {
-    this.writeTextFile(`${this.context.filesDir}/vpn-probe-status.txt`,
-      `${status} | heartbeatMs=${Date.now()}`);
+    this.currentVisibleStatus = status;
+    this.writeCurrentStatusHeartbeat();
+  }
+
+  private writeCurrentStatusHeartbeat(): void {
+    this.writeAtomicTextFile(`${this.context.filesDir}/vpn-probe-status.txt`,
+      `${this.currentVisibleStatus} | heartbeatMs=${Date.now()}`);
   }
 
   private writeTextFile(path: string, content: string): boolean {

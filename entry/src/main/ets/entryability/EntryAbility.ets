@@ -9,12 +9,14 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { APP_FOREGROUND_EVENT } from '../services/AppLifecycleEvents';
+import { VpnBackgroundTaskManager } from '../services/VpnBackgroundTaskManager';
 
 const DOMAIN = 0x0000;
 const TAG = 'TailscaleOHOS';
 
 export default class EntryAbility extends UIAbility {
   private mainWindow?: window.Window;
+  private readonly vpnBackgroundTask: VpnBackgroundTaskManager = new VpnBackgroundTaskManager();
 
   private applyEdgeToEdge(colorMode?: ConfigurationConstant.ColorMode): void {
     if (this.mainWindow === undefined) {
@@ -38,8 +40,14 @@ export default class EntryAbility extends UIAbility {
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.vpnBackgroundTask.register();
     hilog.info(DOMAIN, TAG, 'EntryAbility onCreate. ability=%{public}s reason=%{public}d',
       want.abilityName ?? '', launchParam.launchReason);
+  }
+
+  onDestroy(): void {
+    this.vpnBackgroundTask.unregister();
+    hilog.info(DOMAIN, TAG, 'EntryAbility onDestroy');
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -71,12 +79,14 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    this.vpnBackgroundTask.onForeground(this.context);
     this.applyEdgeToEdge(this.context.config.colorMode);
     this.context.eventHub.emit(APP_FOREGROUND_EVENT);
     hilog.info(DOMAIN, TAG, 'EntryAbility onForeground');
   }
 
   onBackground(): void {
+    this.vpnBackgroundTask.onBackground(this.context);
     hilog.info(DOMAIN, TAG, 'EntryAbility onBackground');
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "entry",
-  "version": "0.9.0",
+  "version": "0.9.8",
   "description": "Tailscale OHOS application entry module",
   "main": "",
   "author": "TailscaleOHOS contributors",

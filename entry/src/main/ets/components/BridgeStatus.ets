@@ -1,8 +1,10 @@
 import nativeBridge from 'libtailscale_ohos.so';
+import appProcess from '@ohos.process';
 import { bundleManager, common, Want } from '@kit.AbilityKit';
 import { vpnExtension } from '@kit.NetworkKit';
 import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { LengthMetrics } from '@kit.ArkUI';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { DiagnosticEventStore } from '../services/DiagnosticEventStore';
@@ -56,6 +58,10 @@ const MIN_CONNECTION_LOADING_MS: number = 250;
 const CONNECTION_START_FRAME_DELAY_MS: number = 32;
 const CONNECTION_POLL_INTERVAL_MS: number = 250;
 const BACKEND_READINESS_POLL_INTERVAL_MS: number = 250;
+const CACHE_SIZE_POLL_INTERVAL_MS: number = 500;
+const VPN_HEARTBEAT_FRESH_MS: number = 5000;
+const VPN_HEARTBEAT_CONFIRM_TIMEOUT_MS: number = 2500;
+const VPN_CONNECTED_GRACE_MS: number = 8000;
 const FILE_WATCH_CLOSE_WRITE: number = 0x8;
 const FAST_RECONNECT_TTL_MS: number = 15000;
 const VPN_STOP_POLL_INTERVAL_MS: number = 50;
@@ -71,12 +77,21 @@ const TAILDROP_INBOX_DIR_NAME: string = 'taildrop-inbox-export';
 const TAILDROP_RECEIVE_REQUEST_FILE_NAME: string = 'taildrop-receive-request.json';
 const TAILDROP_RECEIVE_RESPONSE_FILE_NAME: string = 'taildrop-receive-response.json';
 const TAILDROP_HISTORY_FILE_NAME: string = 'taildrop-history.json';
+const TAILDROP_INBOX_SNAPSHOT_FILE_NAME: string = 'taildrop-inbox-snapshot.json';
+const TAILDROP_HISTORY_MEDIA_DIR_NAME: string = 'taildrop-history-media';
+const TAILDROP_THUMBNAIL_EDGE_PX: number = 128;
+const TAILDROP_THUMBNAIL_JPEG_QUALITY: number = 72;
 const TAILDROP_HISTORY_LIMIT: number = 10;
 const TAILDROP_MAX_FILE_SELECTION: number = 10;
 const TAILDROP_MAX_MEDIA_SELECTION: number = 100;
+const TAILDROP_RECEIVE_BACKEND_TIMEOUT_MS: number = 45000;
+const TAILDROP_SAVE_TIMEOUT_MS: number = 60000;
 const TAILDROP_TEXT_CLIPBOARD_MAX_BYTES: number = 1024 * 1024;
 const TAILDROP_IMAGE_EXTENSIONS: string[] = [
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'dng'
+];
+const TAILDROP_VIDEO_EXTENSIONS: string[] = [
+  'mp4', 'mov', 'm4v', '3gp', '3g2', 'mkv', 'webm'
 ];
 const TAILDROP_TEXT_EXTENSIONS: string[] = [
   'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'json5', 'xml', 'yaml', 'yml', 'log',
@@ -213,6 +228,7 @@ interface TaildropTransferSummary {
   fileSize: number;
   bytesSent: number;
   totalBytes: number;
+  previewPath: string;
   completedAtMs: number;
 }
 
@@ -220,6 +236,7 @@ interface TaildropSendFile {
   path: string;
   name: string;
   size: number;
+  previewPath: string;
 }
 
 interface TaildropSendRequest {
@@ -251,6 +268,22 @@ interface TaildropReceiveResult {
   path: string;
 }
 
+interface TaildropMediaPreview {
+  requestId: number;
+  name: string;
+  size: number;
+  path: string;
+  thumbnailPath: string;
+  mediaType: photoAccessHelper.PhotoType;
+}
+
+interface TaildropCachedFile {
+  requestId: number;
+  name: string;
+  size: number;
+  path: string;
+}
+
 interface TaildropTransferRecord {
   requestId: number;
   direction: string;
@@ -261,11 +294,19 @@ interface TaildropTransferRecord {
   fileName: string;
   fileCount: number;
   totalBytes: number;
+  previewPath: string;
   completedAtMs: number;
 }
 
 interface PersistedTaildropHistory {
   records: TaildropTransferRecord[];
+}
+
+interface PersistedTaildropInbox {
+  files: TaildropWaitingFileSummary[];
+  inboxReason: string;
+  mediaPreviews?: TaildropMediaPreview[];
+  cachedFiles?: TaildropCachedFile[];
 }
 
 interface PersistedPeerSnapshot {
@@ -304,7 +345,7 @@ function emptyTaildropTransfer(): TaildropTransferSummary {
   return {
     requestId: 0, state: 'idle', reason: '', targetKey: '', targetName: '', fileName: '',
     fileIndex: 0, fileCount: 0, fileBytes: 0, fileSize: 0, bytesSent: 0, totalBytes: 0,
-    completedAtMs: 0
+    previewPath: '', completedAtMs: 0
   };
 }
 
@@ -372,7 +413,7 @@ export struct BridgeStatus {
     keyExpiryUnixMs: 0
   };
   @State avatarLoadFailed: boolean = false;
-  @State appVersion: string = '0.8.42';
+  @State appVersion: string = '0.9.1';
   @State tailscaleVersion: string = '—';
   @State exitNodeStatus: string = '未使用出口节点';
   @State logoutStatus: string = '';
@@ -403,13 +444,17 @@ export struct BridgeStatus {
   @State taildropInboxReason: string = '';
   @State taildropTransfer: TaildropTransferSummary = emptyTaildropTransfer();
   @State taildropReceive: TaildropReceiveResult = emptyTaildropReceive();
+  @State taildropMediaPreviews: TaildropMediaPreview[] = [];
+  @State taildropCachedFiles: TaildropCachedFile[] = [];
   @State taildropHistory: TaildropTransferRecord[] = [];
   @State taildropPreparing: boolean = false;
   @State taildropReceiveInProgress: boolean = false;
   @State taildropReceiveRouting: boolean = false;
-  @State expandedTaildropTargetKey: string = '';
+  @State taildropMediaSaveInProgress: boolean = false;
   @State @Watch('onTaildropTextEditorVisibilityChanged') taildropTextEditorVisible: boolean = false;
+  @State taildropTextPreviewVisible: boolean = false;
   @State taildropTextInput: string = '';
+  @State taildropReceivedText: string = '';
   @State taildropTransferRate: number = 0;
   @State taildropTransferEtaSeconds: number = 0;
   @State taildropCancelPending: boolean = false;
@@ -433,6 +478,9 @@ export struct BridgeStatus {
   @State diagnosticActionInProgress: boolean = false;
   @State glowLevel: number = 3;
   @State connectedHomeLayoutMode: ConnectedHomeLayoutMode = DEFAULT_CONNECTED_HOME_LAYOUT;
+  @State cacheSizeBytes: number = 0;
+  @State cacheSizeLoading: boolean = true;
+  @State cacheClearInProgress: boolean = false;
   @State connectionDetailsVisible: boolean = false;
   @State homeTitleCompact: boolean = false;
   @State layoutWidth: number = 360;
@@ -454,6 +502,11 @@ export struct BridgeStatus {
   private diagnosticsLastTapMs: number = 0;
   private lifecycleTimers: number[] = [];
   private lifecycleGeneration: number = 0;
+  private cacheRefreshScheduled: boolean = false;
+  private cacheSizeRefreshInFlight: boolean = false;
+  private cacheSizeRefreshTimer: number = -1;
+  private cacheSizePollTimer: number = -1;
+  private cacheClearRequestedFromSettings: boolean = false;
   private refreshInFlight: boolean = false;
   private vpnConflictDialogVisible: boolean = false;
   private welcomeDialogVisible: boolean = false;
@@ -461,6 +514,12 @@ export struct BridgeStatus {
   private trafficLastHeartbeatMs: number = 0;
   private trafficLastDownloadBytes: number = 0;
   private trafficLastUploadBytes: number = 0;
+  private lastConfirmedVpnStatus: string = '';
+  private lastConfirmedVpnHeartbeatMs: number = 0;
+  private vpnStatusGraceActive: boolean = false;
+  private vpnHeartbeatObservationStartedAtMs: number = 0;
+  private vpnHeartbeatBaselineMs: number = 0;
+  private vpnHeartbeatConfirmed: boolean = false;
   private peerConnectivityPollTimer: number = -1;
   private peerConnectivityRequestId: number = 0;
   private vpnStopPollTimer: number = -1;
@@ -472,10 +531,16 @@ export struct BridgeStatus {
   private taildropProgressSampleBytes: number = 0;
   private taildropProgressSampleMs: number = 0;
   private taildropReceiveResponseInFlight: boolean = false;
+  private taildropReceiveStateStartedAtMs: number = 0;
   private taildropReceiveDestinationUri: string = '';
   private taildropReceiveExpectedSize: number = 0;
   private taildropReceiveMediaType?: photoAccessHelper.PhotoType;
+  private taildropReceivePreviewPath: string = '';
   private taildropReceiveStrategy: string = 'none';
+  private taildropAutoPrefetchKey: string = '';
+  private taildropAutoPrefetchFailedKeys: string[] = [];
+  private taildropPendingTextPreview?: TaildropWaitingFileSummary;
+  private taildropPendingMediaSave?: TaildropWaitingFileSummary;
   private taildropPickerOpen: boolean = false;
   private taildropTextTarget?: TaildropTargetSummary;
   private peerDataSource: PeerDataSource = new PeerDataSource();
@@ -519,17 +584,25 @@ export struct BridgeStatus {
 
   aboutToAppear(): void {
     this.lifecycleGeneration++;
+    this.lastConfirmedVpnStatus = '';
+    this.lastConfirmedVpnHeartbeatMs = 0;
+    this.vpnStatusGraceActive = false;
+    this.vpnHeartbeatObservationStartedAtMs = Date.now();
+    this.vpnHeartbeatBaselineMs = 0;
+    this.vpnHeartbeatConfirmed = false;
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     context.eventHub.on(APP_FOREGROUND_EVENT, this.appForegroundListener);
     this.loadGlowLevel();
     this.fakeMediaServiceOnline = false;
     this.loadConnectedHomeLayoutPreference(context);
+    this.refreshCacheSize();
     this.resetDiagnosticsMode();
     this.backendReady = false;
     this.devicesLoading = true;
     this.verifyNativeBridge();
     this.loadAppVersion();
     this.loadTaildropHistory();
+    this.loadPersistedTaildropInbox();
     this.loadControlServerSettings();
     this.scheduleLifecycleTask(() => this.showWelcomeDialogIfNeeded(), 350);
     this.recordDiagnosticEvent('ui_opened', 'lifecycle');
@@ -578,6 +651,7 @@ export struct BridgeStatus {
     this.stopHealthPolling();
     this.stopLoginPolling();
     this.stopPeerConnectivityPolling();
+    this.stopCacheSizePolling();
     this.streamingStates.forEach((state: DeviceStreamingState) => {
       this.sunshineProbeService?.cancel(state.peerKey);
       this.peerPathService?.cancel(state.peerKey);
@@ -595,6 +669,9 @@ export struct BridgeStatus {
     const generation: number = this.lifecycleGeneration;
     const vpnIsLive: boolean = this.refreshVpnProbeStatus();
     this.startHealthPolling();
+    if (this.activeTab === 2) {
+      this.startCacheSizePolling();
+    }
     if (!this.controlServerConfirmed) {
       return;
     }
@@ -704,6 +781,7 @@ export struct BridgeStatus {
 
   private navigateToTab(index: number): void {
     this.activeTab = index;
+    this.updateCacheSizePolling(index);
     if (this.currentTab === index) {
       return;
     }
@@ -1287,6 +1365,9 @@ export struct BridgeStatus {
     if (this.disconnectInProgress) {
       return;
     }
+    this.lastConfirmedVpnStatus = '';
+    this.lastConfirmedVpnHeartbeatMs = 0;
+    this.vpnStatusGraceActive = false;
     this.clearConnectionCompletionTimer();
     this.setConnectInProgress(false);
     this.disconnectInProgress = true;
@@ -1487,6 +1568,264 @@ export struct BridgeStatus {
     return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB${suffix}`;
   }
 
+  private cacheSizeLabel(): ResourceStr {
+    if (this.cacheClearActive()) {
+      return $r('app.string.settings_cache_clearing');
+    }
+    if (this.cacheSizeLoading) {
+      return $r('app.string.settings_cache_calculating');
+    }
+    return this.formatTrafficBytes(this.cacheSizeBytes);
+  }
+
+  private cacheDirectorySize(path: string): number {
+    if (!fileIo.accessSync(path)) {
+      return 0;
+    }
+    const stat: fileIo.Stat = fileIo.statSync(path);
+    if (stat.isFile()) {
+      return stat.size;
+    }
+    if (!stat.isDirectory()) {
+      return 0;
+    }
+    let size: number = 0;
+    fileIo.listFileSync(path).forEach((name: string) => {
+      size += this.cacheDirectorySize(`${path}/${name}`);
+    });
+    return size;
+  }
+
+  private appCacheRoots(context: common.UIAbilityContext): string[] {
+    return [
+      context.cacheDir,
+      `${context.filesDir}/${TAILDROP_OUTBOX_DIR_NAME}`,
+      `${context.filesDir}/${TAILDROP_INBOX_DIR_NAME}`,
+      `${context.filesDir}/${TAILDROP_HISTORY_MEDIA_DIR_NAME}`
+    ];
+  }
+
+  private taildropWaitingFilesSize(): number {
+    let size: number = 0;
+    this.taildropWaitingFiles.forEach((file: TaildropWaitingFileSummary) => {
+      size += Math.max(0, file.size);
+    });
+    return size;
+  }
+
+  private taildropCacheClearInProgress(): boolean {
+    return this.taildropReceiveInProgress && this.taildropReceiveStrategy === 'clear';
+  }
+
+  private cacheClearActive(): boolean {
+    return this.cacheClearInProgress || this.taildropCacheClearInProgress();
+  }
+
+  private notifyCacheContentsChanged(): void {
+    if (this.activeTab !== 2 || this.cacheClearInProgress || this.cacheRefreshScheduled) {
+      return;
+    }
+    this.cacheRefreshScheduled = true;
+    this.scheduleLifecycleTask(() => {
+      this.cacheRefreshScheduled = false;
+      this.refreshCacheSize(false);
+    }, 80);
+  }
+
+  private refreshCacheSize(showLoading: boolean = true): void {
+    if (this.cacheClearInProgress || this.cacheSizeRefreshInFlight) {
+      return;
+    }
+    if (showLoading) {
+      this.cacheSizeLoading = true;
+    }
+    this.cacheSizeRefreshInFlight = true;
+    const generation: number = this.lifecycleGeneration;
+    this.cacheSizeRefreshTimer = setTimeout(() => {
+      this.cacheSizeRefreshTimer = -1;
+      if (generation !== this.lifecycleGeneration) {
+        this.cacheSizeRefreshInFlight = false;
+        return;
+      }
+      try {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        let totalSize: number = 0;
+        this.appCacheRoots(context).forEach((path: string) => {
+          totalSize += this.cacheDirectorySize(path);
+        });
+        totalSize += this.taildropWaitingFilesSize();
+        if (this.cacheSizeBytes !== totalSize) {
+          this.cacheSizeBytes = totalSize;
+        }
+      } catch (_error) {
+        this.cacheSizeBytes = 0;
+      } finally {
+        this.cacheSizeRefreshInFlight = false;
+        this.cacheSizeLoading = false;
+      }
+    }, 0);
+  }
+
+  private startCacheSizePolling(): void {
+    if (this.cacheSizePollTimer >= 0) {
+      this.refreshCacheSize(false);
+      return;
+    }
+    this.refreshCacheSize();
+    this.cacheSizePollTimer = setInterval(() => {
+      if (this.activeTab === 2) {
+        this.refreshCacheSize(false);
+      }
+    }, CACHE_SIZE_POLL_INTERVAL_MS);
+  }
+
+  private stopCacheSizePolling(): void {
+    if (this.cacheSizePollTimer >= 0) {
+      clearInterval(this.cacheSizePollTimer);
+      this.cacheSizePollTimer = -1;
+    }
+    if (this.cacheSizeRefreshTimer >= 0) {
+      clearTimeout(this.cacheSizeRefreshTimer);
+      this.cacheSizeRefreshTimer = -1;
+      this.cacheSizeRefreshInFlight = false;
+    }
+  }
+
+  private updateCacheSizePolling(index: number): void {
+    if (index === 2) {
+      this.startCacheSizePolling();
+    } else {
+      this.stopCacheSizePolling();
+    }
+  }
+
+  private cacheClearBlocked(): boolean {
+    return this.cacheClearActive() || this.diagnosticReportInProgress ||
+      this.taildropPreparing || this.taildropReceiveInProgress ||
+      this.taildropTransfer.state === 'queued' || this.taildropTransfer.state === 'sending';
+  }
+
+  private cacheClearEnabled(): boolean {
+    return !this.cacheSizeLoading && this.cacheSizeBytes > 0 && !this.cacheClearBlocked();
+  }
+
+  private removeCacheEntry(path: string): boolean {
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(path);
+      if (stat.isFile()) {
+        fileIo.unlinkSync(path);
+        return true;
+      }
+      if (!stat.isDirectory()) {
+        return false;
+      }
+      let succeeded: boolean = true;
+      fileIo.listFileSync(path).forEach((name: string) => {
+        if (!this.removeCacheEntry(`${path}/${name}`)) {
+          succeeded = false;
+        }
+      });
+      if (succeeded) {
+        fileIo.rmdirSync(path);
+      }
+      return succeeded;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  private confirmClearAppCache(): void {
+    if (!this.cacheClearEnabled()) {
+      return;
+    }
+    this.getUIContext().showAlertDialog({
+      title: $r('app.string.settings_clear_cache_confirm_title'),
+      message: $r('app.string.settings_clear_cache_confirm_message'),
+      autoCancel: true,
+      primaryButton: {
+        value: $r('app.string.cancel_action'),
+        action: () => {
+          // Keep the current cache untouched.
+        }
+      },
+      secondaryButton: {
+        value: $r('app.string.settings_clear_cache_action'),
+        fontColor: $r('sys.color.font_emphasize'),
+        action: () => this.clearAppCache()
+      }
+    });
+  }
+
+  private clearAppCache(): void {
+    if (this.cacheClearBlocked()) {
+      this.showToast($r('app.string.settings_clear_cache_busy'));
+      return;
+    }
+    this.cacheClearInProgress = true;
+    this.scheduleLifecycleTask(() => {
+      const succeeded: boolean = this.clearAppCacheEntries();
+      this.taildropMediaPreviews = [];
+      this.taildropCachedFiles = [];
+      this.taildropAutoPrefetchFailedKeys = [];
+      this.taildropAutoPrefetchKey = '';
+      this.taildropHistory = this.taildropHistory.map((record: TaildropTransferRecord) => {
+        record.previewPath = '';
+        return record;
+      });
+      this.persistTaildropHistory();
+      if (succeeded && this.taildropWaitingFiles.length > 0 && this.taildropState === 'ready') {
+        this.cacheClearRequestedFromSettings = true;
+        if (this.requestTaildropInboxCacheClear()) {
+          return;
+        }
+        this.cacheClearRequestedFromSettings = false;
+        this.finishSettingsCacheClear(false);
+        return;
+      } else if (succeeded && this.taildropState !== 'ready') {
+        this.clearTaildropInboxViewState();
+      }
+      this.finishSettingsCacheClear(succeeded);
+    }, 0);
+  }
+
+  private clearAppCacheEntries(): boolean {
+    let succeeded: boolean = true;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.appCacheRoots(context).forEach((root: string) => {
+        if (!fileIo.accessSync(root)) {
+          return;
+        }
+        fileIo.listFileSync(root).forEach((name: string) => {
+          if (!this.removeCacheEntry(`${root}/${name}`)) {
+            succeeded = false;
+          }
+        });
+      });
+    } catch (_error) {
+      succeeded = false;
+    }
+    return succeeded;
+  }
+
+  private clearTaildropInboxViewState(): void {
+    this.taildropMediaPreviews = [];
+    this.taildropCachedFiles = [];
+    this.taildropAutoPrefetchFailedKeys = [];
+    this.taildropAutoPrefetchKey = '';
+    this.taildropWaitingFiles = [];
+    this.taildropInboxReason = '';
+    this.persistTaildropInbox();
+  }
+
+  private finishSettingsCacheClear(succeeded: boolean): void {
+    this.cacheClearRequestedFromSettings = false;
+    this.cacheClearInProgress = false;
+    this.refreshCacheSize(false);
+    this.showToast(succeeded ? $r('app.string.settings_cache_cleared') :
+      $r('app.string.settings_clear_cache_failed'));
+  }
+
   private trafficChartWidth(): number {
     return Math.max(220, Math.min(760, this.layoutWidth - this.contentMargin() * 2 - 32));
   }
@@ -1524,22 +1863,57 @@ export struct BridgeStatus {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const statusPath: string = `${context.filesDir}/vpn-probe-status.txt`;
       if (!fileIo.accessSync(statusPath)) {
+        if (this.preserveConfirmedVpnStatus('', 0)) {
+          return true;
+        }
         this.vpnStatus = 'HarmonyOS VPN Extension Stopped';
         return false;
       }
-      const persistedStatus: string = fileIo.readTextSync(statusPath);
+      const persistedStatus: string = fileIo.readTextSync(statusPath).trim();
       const heartbeatMatch: RegExpMatchArray | null = persistedStatus.match(/heartbeatMs=(\d+)/);
       const heartbeatMs: number = heartbeatMatch === null ? 0 : Number(heartbeatMatch[1]);
       const heartbeatAgeMs: number = Date.now() - heartbeatMs;
-      const heartbeatIsFresh: boolean = heartbeatMs > 0 && heartbeatAgeMs >= 0 && heartbeatAgeMs <= 5000;
+      const heartbeatIsFresh: boolean = heartbeatMs > 0 && heartbeatAgeMs >= 0 &&
+        heartbeatAgeMs <= VPN_HEARTBEAT_FRESH_MS;
       const visibleStatus: string = persistedStatus.replace(/\s*\|\s*heartbeatMs=\d+/, '');
-      const extensionIsLive: boolean = heartbeatIsFresh && !visibleStatus.includes('destroyed');
+      let extensionIsLive: boolean = heartbeatIsFresh && !visibleStatus.includes('destroyed');
+      if (extensionIsLive && !this.vpnHeartbeatConfirmed) {
+        if (this.vpnHeartbeatBaselineMs <= 0) {
+          this.vpnHeartbeatBaselineMs = heartbeatMs;
+        }
+        const heartbeatAdvanced: boolean = heartbeatMs > this.vpnHeartbeatBaselineMs ||
+          heartbeatMs >= this.vpnHeartbeatObservationStartedAtMs;
+        if (heartbeatAdvanced) {
+          this.vpnHeartbeatConfirmed = true;
+        } else if (Date.now() - this.vpnHeartbeatObservationStartedAtMs <=
+          VPN_HEARTBEAT_CONFIRM_TIMEOUT_MS) {
+          // A recent persisted Running state is not proof that the Extension
+          // survived a process crash. Wait for one post-launch heartbeat
+          // advance before exposing it as connected.
+          this.vpnStatus = 'HarmonyOS VPN Extension starting verification';
+          return true;
+        } else {
+          extensionIsLive = false;
+        }
+      }
+      if (extensionIsLive && visibleStatus.includes('state=Running') &&
+        visibleStatus.includes('tun=true')) {
+        if (this.vpnStatusGraceActive) {
+          this.recordDiagnosticEvent('vpn_status_grace_recovered', 'heartbeat');
+          this.vpnStatusGraceActive = false;
+        }
+        this.lastConfirmedVpnStatus = visibleStatus;
+        this.lastConfirmedVpnHeartbeatMs = heartbeatMs;
+      } else if (this.preserveConfirmedVpnStatus(visibleStatus, heartbeatMs)) {
+        return true;
+      }
       if (extensionIsLive) {
         this.updateTrafficMetrics(visibleStatus, heartbeatMs);
         if (visibleStatus.includes('state=Running')) {
           this.refreshPeerSnapshot();
         }
         this.refreshTaildropSnapshot();
+        this.checkTaildropReceiveTimeout();
         this.processTaildropReceiveResponse();
       } else {
         this.resetTrafficMetrics();
@@ -1578,10 +1952,47 @@ export struct BridgeStatus {
       }
       return extensionIsLive;
     } catch (error) {
+      if (this.preserveConfirmedVpnStatus('', 0)) {
+        return true;
+      }
       const businessError = error as BusinessError;
       this.vpnStatus = `FAILED | VPN status file | code=${businessError.code}`;
       return false;
     }
+  }
+
+  private preserveConfirmedVpnStatus(status: string, heartbeatMs: number): boolean {
+    if (this.disconnectInProgress || this.lastConfirmedVpnStatus.length === 0 ||
+      this.lastConfirmedVpnHeartbeatMs <= 0) {
+      return false;
+    }
+    const confirmedAgeMs: number = Date.now() - this.lastConfirmedVpnHeartbeatMs;
+    if (confirmedAgeMs < 0 || confirmedAgeMs > VPN_CONNECTED_GRACE_MS) {
+      if (this.vpnStatusGraceActive) {
+        this.recordDiagnosticEvent('vpn_status_grace_expired', 'heartbeat');
+        this.vpnStatusGraceActive = false;
+      }
+      return false;
+    }
+    const normalizedStatus: string = status.toLowerCase();
+    const explicitStop: boolean = normalizedStatus.includes('destroyed') ||
+      normalizedStatus.includes('disconnect') || normalizedStatus.includes('stopped') ||
+      normalizedStatus.startsWith('failed');
+    const heartbeatUnavailable: boolean = heartbeatMs <= 0 ||
+      Date.now() - heartbeatMs > VPN_HEARTBEAT_FRESH_MS;
+    const liveTunTransition: boolean = status.includes('backend starting') ||
+      (status.includes('tun=true') &&
+        (status.includes('state=NoState') || status.includes('state=Starting')));
+    if (explicitStop || (!heartbeatUnavailable && !liveTunTransition)) {
+      return false;
+    }
+    if (!this.vpnStatusGraceActive) {
+      this.vpnStatusGraceActive = true;
+      this.recordDiagnosticEvent('vpn_status_grace_started',
+        liveTunTransition ? 'tun_transition' : 'heartbeat');
+    }
+    this.vpnStatus = this.lastConfirmedVpnStatus;
+    return true;
   }
 
   private startConnectionPolling(): void {
@@ -1695,10 +2106,16 @@ export struct BridgeStatus {
     this.taildropState = 'disconnected';
     this.taildropReason = '';
     this.taildropTargets = [];
-    this.taildropWaitingFiles = [];
-    this.taildropInboxReason = '';
+    this.taildropAutoPrefetchKey = '';
+    this.taildropPendingTextPreview = undefined;
+    this.taildropPendingMediaSave = undefined;
     if (this.taildropReceiveInProgress) {
-      this.failTaildropReceive('disconnected');
+      if (this.taildropReceive.state === 'awaiting_gallery_save' ||
+        this.taildropReceive.state === 'awaiting_text_preview') {
+        this.resetTaildropReceiveOperation();
+      } else {
+        this.failTaildropReceive('disconnected');
+      }
     }
     if (this.taildropTransfer.state === 'queued' || this.taildropTransfer.state === 'sending') {
       this.applyTaildropTransfer(this.taildropTransferFailure(this.taildropTransfer, 'disconnected'));
@@ -1731,6 +2148,7 @@ export struct BridgeStatus {
       fileSize: transfer.fileSize,
       bytesSent: transfer.bytesSent,
       totalBytes: transfer.totalBytes,
+      previewPath: transfer.previewPath,
       completedAtMs: Date.now()
     };
   }
@@ -1783,12 +2201,20 @@ export struct BridgeStatus {
       return;
     }
     if (transfer.requestId === this.taildropTransfer.requestId) {
+      if (typeof transfer.previewPath !== 'string') {
+        transfer.previewPath = '';
+      }
       if (transfer.targetName.length === 0) {
         transfer.targetName = this.taildropTransfer.targetName;
       }
       if (transfer.fileName.length === 0) {
         transfer.fileName = this.taildropTransfer.fileName;
       }
+      if (transfer.previewPath.length === 0) {
+        transfer.previewPath = this.taildropTransfer.previewPath;
+      }
+    } else if (typeof transfer.previewPath !== 'string') {
+      transfer.previewPath = '';
     }
     this.updateTaildropProgressEstimate(transfer);
     this.taildropTransfer = transfer;
@@ -1812,6 +2238,7 @@ export struct BridgeStatus {
         fileName: transfer.fileName,
         fileCount: transfer.fileCount,
         totalBytes: transfer.totalBytes,
+        previewPath: transfer.previewPath,
         completedAtMs: transfer.completedAtMs > 0 ? transfer.completedAtMs : Date.now()
       };
       this.taildropHistory = [record].concat(this.taildropHistory).slice(0, TAILDROP_HISTORY_LIMIT);
@@ -1848,10 +2275,25 @@ export struct BridgeStatus {
           !file.name.includes('/') && !file.name.includes('\\') && file.size >= 0);
       this.taildropState = snapshot.state;
       this.taildropReason = snapshot.reason;
-      this.taildropTargets = validTargets;
-      this.taildropWaitingFiles = validWaitingFiles;
-      this.taildropInboxReason = snapshot.inboxReason;
+      if (JSON.stringify(this.taildropTargets) !== JSON.stringify(validTargets)) {
+        this.taildropTargets = validTargets;
+      }
+      if (validWaitingFiles.length > 0) {
+        const waitingFilesChanged: boolean =
+          JSON.stringify(this.taildropWaitingFiles) !== JSON.stringify(validWaitingFiles);
+        if (waitingFilesChanged) {
+          this.taildropWaitingFiles = validWaitingFiles;
+          this.notifyCacheContentsChanged();
+        }
+        this.taildropInboxReason = snapshot.inboxReason;
+        if (waitingFilesChanged) {
+          this.persistTaildropInbox();
+        }
+      } else if (this.taildropWaitingFiles.length === 0) {
+        this.taildropInboxReason = snapshot.inboxReason;
+      }
       this.applyTaildropTransfer(snapshot.transfer);
+      this.prefetchTaildropImage(validWaitingFiles);
     } catch (_error) {
       // The Extension may be replacing the snapshot file. Keep the previous
       // valid result and retry on the next one-second health poll.
@@ -1875,7 +2317,9 @@ export struct BridgeStatus {
           this.scheduleHealthPoll(generation);
         }
       });
-    }, 1000);
+    }, this.taildropReceiveInProgress &&
+      this.taildropReceive.state !== 'awaiting_gallery_save' &&
+      this.taildropReceive.state !== 'awaiting_text_preview' ? 120 : 1000);
   }
 
   private async refreshOrRecoverBackend(generation: number): Promise<void> {
@@ -2108,7 +2552,11 @@ export struct BridgeStatus {
   private localDeviceName(): string {
     const sourceName: string = this.accountSummary.deviceName.length > 0 ?
       this.accountSummary.deviceName : this.deviceModel();
-    let nodeName: string = this.nodeNameSlug(sourceName);
+    const withoutMagicDns: string = sourceName
+      .replace(/(?:[.\s_-]*magicdns)(?:[.\s_-].*)?$/i, '')
+      .trim();
+    let nodeName: string = this.nodeNameSlug(
+      withoutMagicDns.length > 0 ? withoutMagicDns : this.deviceModel());
     const brandName: string = this.nodeNameSlug(deviceInfo.brand);
     if (brandName.length > 0 && nodeName.startsWith(`${brandName}-`)) {
       nodeName = nodeName.substring(brandName.length + 1);
@@ -2164,7 +2612,7 @@ export struct BridgeStatus {
     return this.peers.map((peer: PeerSummary): TaildropTargetSummary => {
       return {
         key: peer.key,
-        name: peer.name,
+        name: this.peerDisplayName(peer.name),
         os: peer.os,
         deviceModel: peer.deviceModel,
         deviceType: peer.deviceType,
@@ -3292,6 +3740,15 @@ export struct BridgeStatus {
     return dotIndex > 0 ? name.substring(0, dotIndex) : name;
   }
 
+  private taildropGalleryAssetTitle(name: string): string {
+    let title: string = this.taildropFileTitle(this.sanitizeTaildropFileName(name, 0))
+      .replace(/[\\/:*?"'`<>|{}\[\]]/g, '_').trim();
+    if (title.length === 0 || title === '.' || title === '..') {
+      title = 'received_image';
+    }
+    return title.length > 180 ? title.substring(0, 180) : title;
+  }
+
   private taildropContentKind(file: TaildropWaitingFileSummary): string {
     const extension: string = this.taildropFileExtension(file.name);
     if (TAILDROP_IMAGE_EXTENSIONS.includes(extension)) {
@@ -3325,6 +3782,101 @@ export struct BridgeStatus {
     return $r('app.string.transfer_save_action');
   }
 
+  private taildropFileSymbol(name: string): Resource {
+    const extension: string = this.taildropFileExtension(name);
+    if (TAILDROP_IMAGE_EXTENSIONS.includes(extension)) {
+      return $r('sys.symbol.picture');
+    }
+    if (TAILDROP_VIDEO_EXTENSIONS.includes(extension)) {
+      return $r('sys.symbol.video');
+    }
+    if (TAILDROP_TEXT_EXTENSIONS.includes(extension)) {
+      return $r('sys.symbol.doc_plaintext');
+    }
+    if (extension === 'pdf') {
+      return $r('sys.symbol.pdf_doc');
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(extension)) {
+      return $r('sys.symbol.doc_zipper');
+    }
+    if (extension === 'hap' || extension === 'hsp' || extension === 'har' ||
+      extension === 'app' || extension === 'apk') {
+      return $r('sys.symbol.archivebox');
+    }
+    return $r('sys.symbol.doc');
+  }
+
+  private taildropReceiveMatches(file: TaildropWaitingFileSummary): boolean {
+    return this.taildropReceiveInProgress && this.taildropReceive.name === file.name;
+  }
+
+  private taildropReceiveRowLoading(file: TaildropWaitingFileSummary): boolean {
+    if (!this.taildropReceiveMatches(file)) {
+      return false;
+    }
+    if (this.taildropReceiveStrategy === 'media-prefetch') {
+      return false;
+    }
+    return this.taildropMediaSaveInProgress ||
+      (this.taildropReceive.state !== 'awaiting_gallery_save' &&
+        this.taildropReceive.state !== 'awaiting_text_preview');
+  }
+
+  private taildropTextPreviewLoading(file: TaildropWaitingFileSummary): boolean {
+    return this.taildropReceiveMatches(file) &&
+      this.taildropReceiveStrategy === 'text-preview' &&
+      this.taildropReceive.state !== 'awaiting_text_preview';
+  }
+
+  private findTaildropMediaPreview(
+    file: TaildropWaitingFileSummary
+  ): TaildropMediaPreview | undefined {
+    return this.taildropMediaPreviews.find((preview: TaildropMediaPreview) =>
+      preview.name === file.name && preview.size === file.size);
+  }
+
+  private findTaildropCachedFile(
+    file: TaildropWaitingFileSummary
+  ): TaildropCachedFile | undefined {
+    return this.taildropCachedFiles.find((cached: TaildropCachedFile) =>
+      cached.name === file.name && cached.size === file.size &&
+      this.validTaildropCachedFile(cached));
+  }
+
+  private validTaildropCachedFile(cached: TaildropCachedFile): boolean {
+    if (cached.path.length === 0) {
+      return false;
+    }
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(cached.path);
+      return stat.isFile() && stat.size === cached.size;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  private taildropWaitingFilePreviewUri(file: TaildropWaitingFileSummary): string {
+    if (!this.isTaildropImageName(file.name)) {
+      return '';
+    }
+    const preview: TaildropMediaPreview | undefined = this.findTaildropMediaPreview(file);
+    return preview === undefined ? '' : this.taildropPreviewUri(preview.thumbnailPath);
+  }
+
+  private taildropActiveReceivePreviewUri(): string {
+    if (this.taildropReceiveMediaType !== photoAccessHelper.PhotoType.IMAGE) {
+      return '';
+    }
+    return this.taildropPreviewUri(this.taildropReceive.path);
+  }
+
+  private taildropHistoryPreviewUri(record: TaildropTransferRecord): string {
+    if (record.fileCount !== 1 || !this.isTaildropImageName(record.fileName)) {
+      return '';
+    }
+    return this.taildropPreviewUri(record.previewPath);
+  }
+
   private taildropTransferStatusText(record: TaildropTransferRecord): ResourceStr {
     if (record.state === 'completed') {
       return record.direction === 'receive' ? $r('app.string.transfer_received_status') :
@@ -3334,23 +3886,346 @@ export struct BridgeStatus {
   }
 
   private taildropTransferRecordTitle(record: TaildropTransferRecord): string {
-    if (record.direction === 'receive') {
-      return record.fileName;
+    const fileName: string = record.fileName.trim();
+    if (fileName.length > 0) {
+      return record.fileCount > 1 ? fileName + ' (' + record.fileCount + ' files)' : fileName;
     }
-    return record.targetName;
+    return record.direction === 'send' ? record.targetName : 'Received file';
   }
 
   private taildropTransferRecordDescription(record: TaildropTransferRecord): string {
     const size: string = this.formatTrafficBytes(record.totalBytes);
-    if (record.direction === 'receive') {
-      return size;
+    if (record.direction === 'send' && record.fileCount <= 1 && record.targetName.length > 0) {
+      return `${size} · ${record.targetName}`;
     }
-    return record.fileCount > 1 ? `${record.fileCount} files · ${size}` : size;
+    return record.fileCount > 1 ? record.fileCount + ' files · ' + size + ' · ' + record.targetName :
+      size + (record.direction === 'send' && record.targetName.length > 0 ? ' · ' + record.targetName : '');
   }
 
   private taildropHistoryPath(): string {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     return `${context.filesDir}/${TAILDROP_HISTORY_FILE_NAME}`;
+  }
+
+  private taildropInboxSnapshotPath(): string {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return `${context.filesDir}/${TAILDROP_INBOX_SNAPSHOT_FILE_NAME}`;
+  }
+
+  private taildropHistoryMediaRoot(): string {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return `${context.filesDir}/${TAILDROP_HISTORY_MEDIA_DIR_NAME}`;
+  }
+
+  private isTaildropImageName(name: string): boolean {
+    return TAILDROP_IMAGE_EXTENSIONS.includes(this.taildropFileExtension(name));
+  }
+
+  private taildropPreviewUri(path: string): string {
+    if (path.length === 0) {
+      return '';
+    }
+    try {
+      return fileIo.accessSync(path) ? fileUri.getUriFromPath(path) : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  private taildropWaitingFileKey(file: TaildropWaitingFileSummary): string {
+    return `${file.name}:${file.size}`;
+  }
+
+  private removeTaildropMediaPreview(name: string, size: number, deleteFile: boolean): void {
+    const removed: TaildropMediaPreview[] = this.taildropMediaPreviews.filter(
+      (preview: TaildropMediaPreview) => preview.name === name && preview.size === size);
+    if (deleteFile) {
+      removed.forEach((preview: TaildropMediaPreview) => {
+        [preview.path, preview.thumbnailPath].forEach((path: string) => {
+          try {
+            if (fileIo.accessSync(path)) {
+              fileIo.unlinkSync(path);
+            }
+          } catch (_error) {
+            // Cache cleanup is retried when the whole inbox cache is cleared.
+          }
+        });
+      });
+    }
+    this.taildropMediaPreviews = this.taildropMediaPreviews.filter(
+      (preview: TaildropMediaPreview) => preview.name !== name || preview.size !== size);
+    if (deleteFile && removed.length > 0) {
+      this.notifyCacheContentsChanged();
+    }
+  }
+
+  private removeTaildropCachedFile(name: string, size: number, deleteFile: boolean): void {
+    const removed: TaildropCachedFile[] = this.taildropCachedFiles.filter(
+      (cached: TaildropCachedFile) => cached.name === name && cached.size === size);
+    if (deleteFile) {
+      removed.forEach((cached: TaildropCachedFile) => {
+        try {
+          if (fileIo.accessSync(cached.path)) {
+            fileIo.unlinkSync(cached.path);
+          }
+        } catch (_error) {
+          // A later full inbox-cache cleanup can retry an inaccessible file.
+        }
+      });
+    }
+    this.taildropCachedFiles = this.taildropCachedFiles.filter(
+      (cached: TaildropCachedFile) => cached.name !== name || cached.size !== size);
+    if (deleteFile && removed.length > 0) {
+      this.notifyCacheContentsChanged();
+    }
+  }
+
+  private reconcileTaildropMediaPreviews(files: TaildropWaitingFileSummary[]): void {
+    const stale: TaildropMediaPreview[] = this.taildropMediaPreviews.filter(
+      (preview: TaildropMediaPreview) => !files.some((file: TaildropWaitingFileSummary) =>
+        file.name === preview.name && file.size === preview.size));
+    stale.forEach((preview: TaildropMediaPreview) => {
+      [preview.path, preview.thumbnailPath].forEach((path: string) => {
+        try {
+          if (fileIo.accessSync(path)) {
+            fileIo.unlinkSync(path);
+          }
+        } catch (_error) {
+          // The next inbox-cache cleanup can remove an inaccessible stale file.
+        }
+      });
+    });
+    const validPreviews: TaildropMediaPreview[] = this.taildropMediaPreviews.filter(
+      (preview: TaildropMediaPreview) => files.some((file: TaildropWaitingFileSummary) =>
+        file.name === preview.name && file.size === preview.size) &&
+        this.taildropPreviewUri(preview.path).length > 0 &&
+        this.taildropPreviewUri(preview.thumbnailPath).length > 0);
+    const previewsChanged: boolean =
+      JSON.stringify(this.taildropMediaPreviews) !== JSON.stringify(validPreviews);
+    if (previewsChanged) {
+      this.taildropMediaPreviews = validPreviews;
+    }
+    const staleCachedFiles: TaildropCachedFile[] = this.taildropCachedFiles.filter(
+      (cached: TaildropCachedFile) => !files.some((file: TaildropWaitingFileSummary) =>
+        file.name === cached.name && file.size === cached.size));
+    staleCachedFiles.forEach((cached: TaildropCachedFile) => {
+      try {
+        if (fileIo.accessSync(cached.path)) {
+          fileIo.unlinkSync(cached.path);
+        }
+      } catch (_error) {
+        // A later full inbox-cache cleanup can retry an inaccessible file.
+      }
+    });
+    const validCachedFiles: TaildropCachedFile[] = this.taildropCachedFiles.filter(
+      (cached: TaildropCachedFile) => files.some((file: TaildropWaitingFileSummary) =>
+        file.name === cached.name && file.size === cached.size) &&
+      this.validTaildropCachedFile(cached));
+    const cachedFilesChanged: boolean =
+      JSON.stringify(this.taildropCachedFiles) !== JSON.stringify(validCachedFiles);
+    if (cachedFilesChanged) {
+      this.taildropCachedFiles = validCachedFiles;
+    }
+    if (stale.length > 0 || staleCachedFiles.length > 0) {
+      this.notifyCacheContentsChanged();
+    }
+    if (previewsChanged || cachedFilesChanged || stale.length > 0 || staleCachedFiles.length > 0) {
+      this.persistTaildropInbox();
+    }
+    this.taildropAutoPrefetchFailedKeys = this.taildropAutoPrefetchFailedKeys.filter(
+      (key: string) => files.some((file: TaildropWaitingFileSummary) =>
+        this.taildropWaitingFileKey(file) === key));
+  }
+
+  private prefetchTaildropImage(files: TaildropWaitingFileSummary[]): void {
+    this.reconcileTaildropMediaPreviews(files);
+    if (this.taildropAutoPrefetchKey.length > 0 &&
+      !files.some((file: TaildropWaitingFileSummary) =>
+        this.taildropWaitingFileKey(file) === this.taildropAutoPrefetchKey)) {
+      this.taildropAutoPrefetchKey = '';
+    }
+    if (this.taildropState !== 'ready' || this.taildropReceiveInProgress ||
+      this.taildropPickerOpen || this.taildropPreparing || this.taildropTransfer.state === 'queued' ||
+      this.taildropTransfer.state === 'sending' || this.taildropAutoPrefetchKey.length > 0) {
+      return;
+    }
+    const imageFile: TaildropWaitingFileSummary | undefined = files.find(
+      (file: TaildropWaitingFileSummary) =>
+        this.resolveTaildropMediaType(file.name) === photoAccessHelper.PhotoType.IMAGE &&
+        this.findTaildropMediaPreview(file) === undefined &&
+        !this.taildropAutoPrefetchFailedKeys.includes(this.taildropWaitingFileKey(file)));
+    if (imageFile !== undefined) {
+      this.taildropAutoPrefetchKey = this.taildropWaitingFileKey(imageFile);
+      try {
+        this.submitTaildropReceiveStage(
+          imageFile, photoAccessHelper.PhotoType.IMAGE, 'media-prefetch', '');
+      } catch (_error) {
+        this.failTaildropMediaPrefetch('extension_error');
+      }
+      return;
+    }
+    const uncachedFile: TaildropWaitingFileSummary | undefined = files.find(
+      (file: TaildropWaitingFileSummary) =>
+        this.resolveTaildropMediaType(file.name) !== photoAccessHelper.PhotoType.IMAGE &&
+        this.findTaildropCachedFile(file) === undefined &&
+        !this.taildropAutoPrefetchFailedKeys.includes(this.taildropWaitingFileKey(file)));
+    if (uncachedFile === undefined) {
+      return;
+    }
+    this.taildropAutoPrefetchKey = this.taildropWaitingFileKey(uncachedFile);
+    try {
+      this.submitTaildropReceiveStage(uncachedFile, undefined, 'file-prefetch', '');
+    } catch (_error) {
+      this.failTaildropMediaPrefetch('extension_error');
+    }
+  }
+
+  private async createTaildropHistoryPreview(
+    sourcePath: string, name: string, requestId: number
+  ): Promise<string> {
+    if (!this.isTaildropImageName(name) || sourcePath.length === 0) {
+      return '';
+    }
+    const root: string = this.taildropHistoryMediaRoot();
+    const destination: string = `${root}/receive-${requestId}-thumb.jpg`;
+    return this.createTaildropThumbnail(sourcePath, destination);
+  }
+
+  private async createTaildropThumbnail(sourcePath: string, destination: string): Promise<string> {
+    let sourceFile: fileIo.File | undefined = undefined;
+    let imageSource: image.ImageSource | undefined = undefined;
+    let pixelMap: image.PixelMap | undefined = undefined;
+    let imagePacker: image.ImagePacker | undefined = undefined;
+    let destinationFile: fileIo.File | undefined = undefined;
+    try {
+      const separator: number = destination.lastIndexOf('/');
+      if (separator > 0) {
+        const parent: string = destination.substring(0, separator);
+        if (!fileIo.accessSync(parent)) {
+          try {
+            fileIo.mkdirSync(parent, true);
+          } catch (error) {
+            const businessError: BusinessError = error as BusinessError;
+            if (businessError.code !== 13900015) {
+              throw new Error(businessError.message);
+            }
+          }
+        }
+      }
+      if (fileIo.accessSync(destination)) {
+        fileIo.unlinkSync(destination);
+      }
+      sourceFile = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+      imageSource = image.createImageSource(sourceFile.fd);
+      const imageInfo: image.ImageInfo = await imageSource.getImageInfo();
+      if (imageInfo.size.width <= 0 || imageInfo.size.height <= 0) {
+        return '';
+      }
+      let width: number = TAILDROP_THUMBNAIL_EDGE_PX;
+      let height: number = TAILDROP_THUMBNAIL_EDGE_PX;
+      if (imageInfo.size.width >= imageInfo.size.height) {
+        height = Math.max(1, Math.round(
+          TAILDROP_THUMBNAIL_EDGE_PX * imageInfo.size.height / imageInfo.size.width));
+      } else {
+        width = Math.max(1, Math.round(
+          TAILDROP_THUMBNAIL_EDGE_PX * imageInfo.size.width / imageInfo.size.height));
+      }
+      pixelMap = await imageSource.createPixelMap({
+        index: 0,
+        desiredSize: { width: width, height: height }
+      });
+      imagePacker = image.createImagePacker();
+      const packed: ArrayBuffer = await imagePacker.packToData(pixelMap, {
+        format: 'image/jpeg',
+        quality: TAILDROP_THUMBNAIL_JPEG_QUALITY
+      });
+      if (packed.byteLength <= 0) {
+        return '';
+      }
+      destinationFile = fileIo.openSync(destination,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
+      const written: number = fileIo.writeSync(destinationFile.fd, packed);
+      fileIo.closeSync(destinationFile);
+      destinationFile = undefined;
+      const stat: fileIo.Stat = fileIo.statSync(destination);
+      if (!stat.isFile() || stat.size !== written || written !== packed.byteLength) {
+        fileIo.unlinkSync(destination);
+        return '';
+      }
+      this.notifyCacheContentsChanged();
+      return destination;
+    } catch (error) {
+      const businessError: BusinessError = error as BusinessError;
+      this.recordDiagnosticEvent(
+        'taildrop_thumbnail_failed', 'imagekit', businessError.code ?? -1);
+      try {
+        if (fileIo.accessSync(destination)) {
+          fileIo.unlinkSync(destination);
+        }
+      } catch (_cleanupError) {
+      }
+      return '';
+    } finally {
+      if (destinationFile !== undefined) {
+        try {
+          fileIo.closeSync(destinationFile);
+        } catch (_error) {
+        }
+      }
+      if (imagePacker !== undefined) {
+        try {
+          await imagePacker.release();
+        } catch (_error) {
+        }
+      }
+      if (pixelMap !== undefined) {
+        try {
+          await pixelMap.release();
+        } catch (_error) {
+        }
+      }
+      if (imageSource !== undefined) {
+        try {
+          await imageSource.release();
+        } catch (_error) {
+        }
+      }
+      if (sourceFile !== undefined) {
+        try {
+          fileIo.closeSync(sourceFile);
+        } catch (_error) {
+        }
+      }
+    }
+  }
+
+  private cleanupTaildropHistoryMedia(): void {
+    const root: string = this.taildropHistoryMediaRoot();
+    try {
+      if (!fileIo.accessSync(root)) {
+        return;
+      }
+      const referenced: Set<string> = new Set<string>(this.taildropHistory
+        .map((record: TaildropTransferRecord) => record.previewPath)
+        .filter((path: string) => path.length > 0));
+      let removedAny: boolean = false;
+      fileIo.listFileSync(root).forEach((name: string) => {
+        const path: string = `${root}/${name}`;
+        if (!referenced.has(path)) {
+          try {
+            fileIo.unlinkSync(path);
+            removedAny = true;
+          } catch (_error) {
+            // A later history write retries stale preview cleanup.
+          }
+        }
+      });
+      if (removedAny) {
+        this.notifyCacheContentsChanged();
+      }
+    } catch (_error) {
+      // Preview cleanup is best effort and must not affect transfer history.
+    }
   }
 
   private validTaildropHistoryRecord(record: TaildropTransferRecord): boolean {
@@ -3368,8 +4243,15 @@ export struct BridgeStatus {
       const persisted: PersistedTaildropHistory = JSON.parse(fileIo.readTextSync(path)) as PersistedTaildropHistory;
       const records: TaildropTransferRecord[] = persisted.records.filter(
         (record: TaildropTransferRecord) => this.validTaildropHistoryRecord(record))
+        .map((record: TaildropTransferRecord) => {
+          if (typeof record.previewPath !== 'string') {
+            record.previewPath = '';
+          }
+          return record;
+        })
         .slice(0, TAILDROP_HISTORY_LIMIT);
       this.taildropHistory = records;
+      this.cleanupTaildropHistoryMedia();
       records.forEach((record: TaildropTransferRecord) => {
         if (record.direction === 'send') {
           this.lastHandledTaildropRequestId = Math.max(this.lastHandledTaildropRequestId, record.requestId);
@@ -3391,6 +4273,7 @@ export struct BridgeStatus {
     }
     try {
       fileIo.renameSync(temporaryPath, path);
+      this.cleanupTaildropHistoryMedia();
     } catch (_error) {
       try {
         if (fileIo.accessSync(temporaryPath)) {
@@ -3412,6 +4295,7 @@ export struct BridgeStatus {
     } catch (_error) {
       this.writePrivateTextFile(path, JSON.stringify({ records: [] } as PersistedTaildropHistory));
     }
+    this.cleanupTaildropHistoryMedia();
     this.showToast($r('app.string.transfer_history_cleared'));
   }
 
@@ -3467,7 +4351,74 @@ export struct BridgeStatus {
 
   private taildropSendActive(): boolean {
     return this.taildropPickerOpen || this.taildropPreparing || this.taildropTransfer.state === 'queued' ||
-      this.taildropTransfer.state === 'sending' || this.taildropReceiveInProgress || this.taildropReceiveRouting;
+      this.taildropTransfer.state === 'sending';
+  }
+
+  private taildropContentChoiceEnabled(): boolean {
+    return !this.taildropPreparing && this.taildropTransfer.state !== 'queued' &&
+      this.taildropTransfer.state !== 'sending' &&
+      (!this.taildropPickerOpen || this.taildropTextEditorVisible);
+  }
+
+  private taildropTextEditorMatches(target: TaildropTargetSummary): boolean {
+    return this.taildropTextEditorVisible && this.taildropTextTarget !== undefined &&
+      this.taildropTextTarget.key === target.key;
+  }
+
+  private closeTaildropTextEditor(): void {
+    this.taildropTextEditorVisible = false;
+    this.taildropPickerOpen = false;
+    this.taildropTextTarget = undefined;
+  }
+
+  private interruptTaildropMediaPrefetch(): void {
+    if (this.taildropReceiveInProgress && this.taildropReceiveStrategy === 'media-prefetch') {
+      this.taildropAutoPrefetchKey = '';
+      this.resetTaildropReceiveOperation();
+    }
+  }
+
+  private loadPersistedTaildropInbox(): void {
+    try {
+      const path: string = this.taildropInboxSnapshotPath();
+      if (!fileIo.accessSync(path)) {
+        return;
+      }
+      const persisted: PersistedTaildropInbox =
+        JSON.parse(fileIo.readTextSync(path)) as PersistedTaildropInbox;
+      this.taildropWaitingFiles = persisted.files.filter((file: TaildropWaitingFileSummary) =>
+        file.name.length > 0 && file.name.length <= 255 &&
+        !file.name.includes('/') && !file.name.includes('\\') && file.size >= 0);
+      this.taildropInboxReason = persisted.inboxReason;
+      const mediaPreviews: TaildropMediaPreview[] =
+        persisted.mediaPreviews === undefined ? [] : persisted.mediaPreviews;
+      this.taildropMediaPreviews = mediaPreviews.filter((preview: TaildropMediaPreview) =>
+        this.taildropWaitingFiles.some((file: TaildropWaitingFileSummary) =>
+          file.name === preview.name && file.size === preview.size) &&
+        this.taildropPreviewUri(preview.path).length > 0 &&
+        this.taildropPreviewUri(preview.thumbnailPath).length > 0);
+      const cachedFiles: TaildropCachedFile[] =
+        persisted.cachedFiles === undefined ? [] : persisted.cachedFiles;
+      this.taildropCachedFiles = cachedFiles.filter((cached: TaildropCachedFile) =>
+        this.taildropWaitingFiles.some((file: TaildropWaitingFileSummary) =>
+          file.name === cached.name && file.size === cached.size) &&
+        this.validTaildropCachedFile(cached));
+    } catch (_error) {
+      this.taildropWaitingFiles = [];
+      this.taildropInboxReason = '';
+      this.taildropMediaPreviews = [];
+      this.taildropCachedFiles = [];
+    }
+  }
+
+  private persistTaildropInbox(): void {
+    const persisted: PersistedTaildropInbox = {
+      files: this.taildropWaitingFiles,
+      inboxReason: this.taildropInboxReason,
+      mediaPreviews: this.taildropMediaPreviews,
+      cachedFiles: this.taildropCachedFiles
+    };
+    this.writePrivateTextFile(this.taildropInboxSnapshotPath(), JSON.stringify(persisted));
   }
 
   private writeTaildropSendRequest(request: TaildropSendRequest): boolean {
@@ -3490,6 +4441,7 @@ export struct BridgeStatus {
     const root: string = this.taildropOutboxRoot();
     const requestDir: string = `${root}/${requestId}`;
     fileIo.mkdirSync(requestDir, true);
+    const historyMediaRoot: string = this.taildropHistoryMediaRoot();
     const prepared: TaildropSendFile[] = [];
     for (let index: number = 0; index < uris.length; index++) {
       let source: fileIo.File | undefined = undefined;
@@ -3506,7 +4458,12 @@ export struct BridgeStatus {
         if (!copiedStat.isFile() || copiedStat.size !== stat.size) {
           throw new Error('Copied Taildrop file failed verification.');
         }
-        prepared.push({ path: destination, name: name, size: copiedStat.size });
+        let previewPath: string = '';
+        if (uris.length === 1 && this.isTaildropImageName(name)) {
+          previewPath = await this.createTaildropThumbnail(
+            destination, `${historyMediaRoot}/${requestId}-thumb.jpg`);
+        }
+        prepared.push({ path: destination, name: name, size: copiedStat.size, previewPath: previewPath });
       } finally {
         if (source !== undefined) {
           try {
@@ -3517,6 +4474,7 @@ export struct BridgeStatus {
         }
       }
     }
+    this.notifyCacheContentsChanged();
     return prepared;
   }
 
@@ -3529,6 +4487,15 @@ export struct BridgeStatus {
       } catch (_error) {
         // Extension startup cleanup handles any remaining outbox file.
       }
+      if (file.previewPath.length > 0) {
+        try {
+          if (fileIo.accessSync(file.previewPath)) {
+            fileIo.unlinkSync(file.previewPath);
+          }
+        } catch (_error) {
+          // Preview cleanup is best effort.
+        }
+      }
     });
     if (files.length > 0) {
       const requestDir: string = files[0].path.substring(0, files[0].path.lastIndexOf('/'));
@@ -3538,42 +4505,65 @@ export struct BridgeStatus {
         // The directory may still contain a file whose cleanup failed.
       }
     }
-  }
-
-  private toggleTaildropSourceChooser(target: TaildropTargetSummary): void {
-    if (!target.online || !this.isConnected() || this.taildropState !== 'ready' ||
-      this.taildropSendActive()) {
-      return;
-    }
-    this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
-      this.expandedTaildropTargetKey = this.expandedTaildropTargetKey === target.key ? '' : target.key;
-    });
+    this.notifyCacheContentsChanged();
   }
 
   private chooseTaildropDocuments(target: TaildropTargetSummary): void {
-    this.expandedTaildropTargetKey = '';
+    if (this.taildropTextEditorVisible) {
+      this.closeTaildropTextEditor();
+    }
+    if (!this.ensureTaildropSendAvailable(target)) {
+      return;
+    }
     this.selectTaildropDocuments(target).catch(() => {
       this.handleTaildropSelectionFailure();
     });
   }
 
   private chooseTaildropPhotos(target: TaildropTargetSummary): void {
-    this.expandedTaildropTargetKey = '';
+    if (this.taildropTextEditorVisible) {
+      this.closeTaildropTextEditor();
+    }
+    if (!this.ensureTaildropSendAvailable(target)) {
+      return;
+    }
     this.selectTaildropMedia(target).catch(() => {
       this.handleTaildropSelectionFailure();
     });
   }
 
   private chooseTaildropText(target: TaildropTargetSummary): void {
-    if (!target.online || !this.isConnected() || this.taildropState !== 'ready' ||
-      this.taildropSendActive()) {
+    if (this.taildropTextEditorMatches(target)) {
+      this.closeTaildropTextEditor();
       return;
     }
-    this.expandedTaildropTargetKey = '';
+    if (this.taildropTextEditorVisible) {
+      this.closeTaildropTextEditor();
+    }
+    if (!this.ensureTaildropSendAvailable(target)) {
+      return;
+    }
     this.taildropTextInput = '';
     this.taildropTextTarget = target;
     this.taildropPickerOpen = true;
     this.taildropTextEditorVisible = true;
+  }
+
+  private ensureTaildropSendAvailable(target: TaildropTargetSummary): boolean {
+    if (!this.isConnected() || this.taildropState !== 'ready') {
+      this.showToast($r('app.string.transfer_connect_first_title'));
+      return false;
+    }
+    if (!target.online) {
+      this.showToast($r('app.string.transfer_send_target_unavailable'));
+      return false;
+    }
+    this.interruptTaildropMediaPrefetch();
+    if (this.taildropSendActive()) {
+      this.showToast($r('app.string.transfer_busy_message'));
+      return false;
+    }
+    return true;
   }
 
   private handleTaildropSelectionFailure(): void {
@@ -3698,7 +4688,8 @@ export struct BridgeStatus {
       this.taildropTransfer = {
         requestId: requestId, state: 'queued', reason: '', targetKey: target.key,
         targetName: target.name, fileName: '', fileIndex: 0, fileCount: files.length,
-        fileBytes: 0, fileSize: 0, bytesSent: 0, totalBytes: totalBytes, completedAtMs: 0
+        fileBytes: 0, fileSize: 0, bytesSent: 0, totalBytes: totalBytes,
+        previewPath: files.length === 1 ? files[0].previewPath : '', completedAtMs: 0
       };
       this.resetTaildropProgressEstimate();
       this.taildropRequestSubmittedAtMs = Date.now();
@@ -3744,111 +4735,163 @@ export struct BridgeStatus {
       this.showToast($r('app.string.transfer_send_target_unavailable'));
       return;
     }
-    this.getUIContext().animateTo({ duration: 260, curve: Curve.EaseInOut }, () => {
-      this.expandedTaildropTargetKey = target.key;
-    });
     this.transferScroller.scrollEdge(Edge.Top);
     this.showToast($r('app.string.transfer_retry_choose_content'));
   }
 
   private startTaildropReceive(file: TaildropWaitingFileSummary): void {
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
+    if (this.taildropReceiveInProgress && this.taildropReceive.name !== file.name &&
+      this.taildropReceive.state === 'awaiting_gallery_save') {
+      this.resetTaildropReceiveOperation();
+      this.taildropAutoPrefetchKey = '';
+    }
+    if (this.taildropState !== 'ready' || this.taildropSendActive() ||
+      this.taildropReceiveInProgress) {
       return;
     }
-    this.routeTaildropReceive(file).catch(() => {
-      this.taildropReceiveRouting = false;
+    try {
+      this.routeTaildropReceive(file);
+    } catch (error) {
+      const businessError: BusinessError = error as BusinessError;
+      this.recordDiagnosticEvent('taildrop_receive_submit_failed', 'transfer', businessError.code ?? -1);
+      this.resetTaildropReceiveOperation();
       this.showToast($r('app.string.transfer_receive_failed'));
+    }
+  }
+
+  private startTaildropTextPreview(file: TaildropWaitingFileSummary): void {
+    if (this.taildropContentKind(file) !== 'text') {
+      return;
+    }
+    if (this.taildropReceiveInProgress && this.taildropReceive.name !== file.name &&
+      this.taildropReceive.state === 'awaiting_gallery_save') {
+      this.resetTaildropReceiveOperation();
+      this.taildropAutoPrefetchKey = '';
+    }
+    if (this.taildropReceiveInProgress) {
+      if (this.taildropReceive.name === file.name &&
+        this.taildropReceive.state === 'awaiting_text_preview') {
+        return;
+      }
+      this.taildropPendingTextPreview = file;
+      if (this.taildropReceive.state === 'awaiting_text_preview') {
+        this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseInOut }, () => {
+          this.resetTaildropReceiveOperation();
+        });
+        this.resumePendingTaildropAction();
+      }
+      return;
+    }
+    if (this.taildropSendActive()) {
+      this.showToast($r('app.string.transfer_busy_message'));
+      return;
+    }
+    const cached: TaildropCachedFile | undefined = this.findTaildropCachedFile(file);
+    if (cached !== undefined) {
+      this.showCachedTaildropTextPreview(cached);
+      return;
+    }
+    if (this.taildropState !== 'ready') {
+      this.showToast($r('app.string.transfer_connect_first_title'));
+      return;
+    }
+    try {
+      this.submitTaildropReceiveStage(file, undefined, 'text-preview', '');
+    } catch (error) {
+      const businessError: BusinessError = error as BusinessError;
+      this.recordDiagnosticEvent('taildrop_text_preview_submit_failed', 'transfer', businessError.code ?? -1);
+      this.resetTaildropReceiveOperation();
+      this.showToast($r('app.string.transfer_receive_failed'));
+    }
+  }
+
+  private showCachedTaildropTextPreview(cached: TaildropCachedFile): void {
+    const result: TaildropReceiveResult = {
+      requestId: cached.requestId,
+      action: 'stage',
+      state: 'awaiting_text_preview',
+      reason: '',
+      name: cached.name,
+      size: cached.size,
+      path: cached.path
+    };
+    const content: string | undefined = this.readTaildropTextPreview(result);
+    if (content === undefined) {
+      this.removeTaildropCachedFile(cached.name, cached.size, true);
+      this.persistTaildropInbox();
+      this.showToast($r('app.string.transfer_receive_failed'));
+      return;
+    }
+    this.taildropReceiveStrategy = 'text-preview';
+    this.taildropReceiveExpectedSize = cached.size;
+    this.taildropReceiveInProgress = true;
+    this.taildropReceiveStateStartedAtMs = 0;
+    this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+      this.taildropReceive = result;
+      this.taildropReceivedText = content;
     });
   }
 
-  private normalizedPhotoFormat(format: string): string {
-    return format.trim().toLowerCase().replace(/^\./, '');
+  private resumePendingTaildropAction(): boolean {
+    if (this.taildropReceiveInProgress) {
+      return false;
+    }
+    const pendingMediaSave: TaildropWaitingFileSummary | undefined =
+      this.taildropPendingMediaSave;
+    this.taildropPendingMediaSave = undefined;
+    if (pendingMediaSave !== undefined &&
+      this.findTaildropMediaPreview(pendingMediaSave) !== undefined) {
+      this.startPreparedTaildropMediaSave(pendingMediaSave);
+      return true;
+    }
+    const pending: TaildropWaitingFileSummary | undefined = this.taildropPendingTextPreview;
+    this.taildropPendingTextPreview = undefined;
+    if (pending !== undefined) {
+      this.startTaildropTextPreview(pending);
+      return true;
+    }
+    return false;
   }
 
-  private async resolveTaildropMediaType(name: string): Promise<photoAccessHelper.PhotoType | undefined> {
+  private resolveTaildropMediaType(name: string): photoAccessHelper.PhotoType | undefined {
     const extension: string = this.taildropFileExtension(name);
-    if (extension.length === 0) {
-      return undefined;
-    }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const phAccessHelper = photoAccessHelper.getPhotoAccessHelper(context);
-    let imageFormatQuerySucceeded: boolean = false;
-    try {
-      const imageFormats: string[] = await phAccessHelper.getSupportedPhotoFormats(
-        photoAccessHelper.PhotoType.IMAGE);
-      imageFormatQuerySucceeded = true;
-      if (imageFormats.some((format: string) => this.normalizedPhotoFormat(format) === extension)) {
-        return photoAccessHelper.PhotoType.IMAGE;
-      }
-    } catch (_error) {
-      // Fall back to common extensions when the format query is temporarily unavailable.
-    }
-    let videoFormatQuerySucceeded: boolean = false;
-    try {
-      const videoFormats: string[] = await phAccessHelper.getSupportedPhotoFormats(
-        photoAccessHelper.PhotoType.VIDEO);
-      videoFormatQuerySucceeded = true;
-      if (videoFormats.some((format: string) => this.normalizedPhotoFormat(format) === extension)) {
-        return photoAccessHelper.PhotoType.VIDEO;
-      }
-    } catch (_error) {
-      // Fall back to common extensions when the format query is temporarily unavailable.
-    }
-    const commonImageExtensions: string[] = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'gif', 'webp', 'bmp', 'dng'];
-    if (!imageFormatQuerySucceeded && commonImageExtensions.includes(extension)) {
+    if (TAILDROP_IMAGE_EXTENSIONS.includes(extension)) {
       return photoAccessHelper.PhotoType.IMAGE;
     }
-    const commonVideoExtensions: string[] = ['mp4', 'mov', 'm4v', '3gp', '3g2', 'mkv', 'webm'];
-    if (!videoFormatQuerySucceeded && commonVideoExtensions.includes(extension)) {
+    if (TAILDROP_VIDEO_EXTENSIONS.includes(extension)) {
       return photoAccessHelper.PhotoType.VIDEO;
     }
     return undefined;
   }
 
-  private async routeTaildropReceive(file: TaildropWaitingFileSummary): Promise<void> {
+  private routeTaildropReceive(file: TaildropWaitingFileSummary): void {
     if (this.taildropContentKind(file) === 'text') {
       this.submitTaildropReceiveStage(file, undefined, 'text', '');
       return;
     }
-    this.taildropReceiveRouting = true;
-    let mediaType: photoAccessHelper.PhotoType | undefined = undefined;
-    try {
-      mediaType = await this.resolveTaildropMediaType(file.name);
-    } finally {
-      this.taildropReceiveRouting = false;
-    }
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
-      return;
-    }
+    const mediaType: photoAccessHelper.PhotoType | undefined = this.resolveTaildropMediaType(file.name);
     if (mediaType !== undefined) {
       this.submitTaildropReceiveStage(file, mediaType, 'media', '');
       return;
     }
-    await this.selectTaildropReceiveDestination(file);
+    this.submitTaildropReceiveStage(file, undefined, 'file', '');
   }
 
-  private async selectTaildropReceiveDestination(file: TaildropWaitingFileSummary): Promise<void> {
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
-      return;
-    }
+  private async selectTaildropReceiveDestination(result: TaildropReceiveResult): Promise<string> {
     this.taildropPickerOpen = true;
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const documentPicker = new picker.DocumentViewPicker(context);
     const options = new picker.DocumentSaveOptions();
-    options.newFileNames = [file.name];
+    options.newFileNames = [this.sanitizeTaildropFileName(result.name, 0)];
     let uris: string[] = [];
     try {
       uris = await documentPicker.save(options);
     } catch (_error) {
       this.showToast($r('app.string.transfer_receive_picker_failed'));
-      return;
     } finally {
       this.taildropPickerOpen = false;
     }
-    if (uris.length === 0) {
-      return;
-    }
-    this.submitTaildropReceiveStage(file, undefined, 'file', uris[0]);
+    return uris.length > 0 ? uris[0] : '';
   }
 
   private submitTaildropReceiveStage(
@@ -3857,13 +4900,17 @@ export struct BridgeStatus {
     strategy: string = 'file',
     destinationUri: string = ''
   ): void {
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
+    if (this.taildropState !== 'ready' || this.taildropSendActive()) {
+      return;
+    }
+    const requestId: number = Date.now();
+    const inboxRoot: string = this.taildropInboxRoot();
+    if (!this.ensureTaildropDirectory(inboxRoot)) {
+      this.recordDiagnosticEvent('taildrop_receive_inbox_unavailable', 'transfer');
+      this.showToast($r('app.string.transfer_receive_failed'));
       return;
     }
     this.taildropReceiveInProgress = true;
-    const requestId: number = Date.now();
-    const inboxRoot: string = this.taildropInboxRoot();
-    fileIo.mkdirSync(inboxRoot, true);
     const request: TaildropReceiveRequest = {
       requestId: requestId,
       action: 'stage',
@@ -3879,6 +4926,7 @@ export struct BridgeStatus {
       requestId: requestId, action: 'stage', state: 'requesting', reason: '', name: file.name,
       size: file.size, path: request.path
     };
+    this.taildropReceiveStateStartedAtMs = Date.now();
     this.writePrivateTextFile(this.taildropReceiveResponsePath(), '');
     if (!this.writeAtomicTaildropRequest(this.taildropReceiveRequestPath(), requestId, JSON.stringify(request))) {
       this.failTaildropReceive('extension_error');
@@ -3886,6 +4934,23 @@ export struct BridgeStatus {
     }
     this.recordDiagnosticEvent(mediaType === undefined ? 'taildrop_receive_queued' :
       'taildrop_media_receive_queued', 'transfer');
+  }
+
+  private ensureTaildropDirectory(path: string): boolean {
+    try {
+      if (!fileIo.accessSync(path)) {
+        fileIo.mkdirSync(path, true);
+      }
+      return fileIo.accessSync(path) && fileIo.statSync(path).isDirectory();
+    } catch (_error) {
+      try {
+        // mkdirSync may report 13900015 when another operation already created
+        // the directory. Treat an existing directory as a successful outcome.
+        return fileIo.accessSync(path) && fileIo.statSync(path).isDirectory();
+      } catch (_verificationError) {
+        return false;
+      }
+    }
   }
 
   private confirmDiscardTaildropFile(file: TaildropWaitingFileSummary): void {
@@ -3911,7 +4976,17 @@ export struct BridgeStatus {
   }
 
   private discardTaildropFile(file: TaildropWaitingFileSummary): void {
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
+    if (this.taildropSendActive() || this.taildropReceiveInProgress) {
+      return;
+    }
+    if (this.taildropState !== 'ready') {
+      this.removeTaildropMediaPreview(file.name, file.size, true);
+      this.removeTaildropCachedFile(file.name, file.size, true);
+      this.taildropWaitingFiles = this.taildropWaitingFiles.filter(
+        (waitingFile: TaildropWaitingFileSummary) => waitingFile.name !== file.name);
+      this.persistTaildropInbox();
+      this.notifyCacheContentsChanged();
+      this.showToast($r('app.string.transfer_discard_completed'));
       return;
     }
     const requestId: number = Date.now();
@@ -3926,6 +5001,7 @@ export struct BridgeStatus {
       requestId: requestId, action: 'delete', state: 'deleting', reason: '', name: file.name,
       size: file.size, path: ''
     };
+    this.taildropReceiveStateStartedAtMs = Date.now();
     this.writePrivateTextFile(this.taildropReceiveResponsePath(), '');
     if (!this.writeAtomicTaildropRequest(this.taildropReceiveRequestPath(), requestId, JSON.stringify(request))) {
       this.failTaildropReceive('discard_failed');
@@ -3956,9 +5032,23 @@ export struct BridgeStatus {
   }
 
   private clearTaildropInboxCache(): void {
-    if (!this.isConnected() || this.taildropState !== 'ready' || this.taildropSendActive()) {
+    if (this.taildropSendActive() || this.taildropReceiveInProgress) {
       return;
     }
+    if (this.taildropState !== 'ready') {
+      const succeeded: boolean = this.clearLocalTaildropInboxCache();
+      if (succeeded) {
+        this.clearTaildropInboxViewState();
+      }
+      this.notifyCacheContentsChanged();
+      this.showToast(succeeded ? $r('app.string.transfer_cache_cleared') :
+        $r('app.string.transfer_clear_cache_failed'));
+      return;
+    }
+    this.requestTaildropInboxCacheClear();
+  }
+
+  private requestTaildropInboxCacheClear(): boolean {
     const requestId: number = Date.now();
     const request: TaildropReceiveRequest = {
       requestId: requestId, action: 'clear', name: '', inboxRoot: '', path: ''
@@ -3968,12 +5058,68 @@ export struct BridgeStatus {
     this.taildropReceive = {
       requestId: requestId, action: 'clear', state: 'requesting', reason: '', name: '', size: 0, path: ''
     };
+    this.taildropReceiveStateStartedAtMs = Date.now();
     this.writePrivateTextFile(this.taildropReceiveResponsePath(), '');
     if (!this.writeAtomicTaildropRequest(this.taildropReceiveRequestPath(), requestId, JSON.stringify(request))) {
-      this.failTaildropReceive('clear_failed');
-      return;
+      this.recordDiagnosticEvent('taildrop_receive_failed', 'clear_failed');
+      this.resetTaildropReceiveOperation();
+      if (!this.cacheClearRequestedFromSettings) {
+        this.showToast($r('app.string.transfer_clear_cache_failed'));
+      }
+      return false;
     }
     this.recordDiagnosticEvent('taildrop_receive_cache_clear_requested', 'transfer');
+    return true;
+  }
+
+  private checkTaildropReceiveTimeout(): void {
+    if (!this.taildropReceiveInProgress) {
+      return;
+    }
+    if (this.taildropReceive.requestId <= 0) {
+      this.recordDiagnosticEvent('taildrop_receive_invalid_busy_state', 'timeout');
+      this.resetTaildropReceiveOperation();
+      this.showToast($r('app.string.transfer_save_timeout'));
+      return;
+    }
+    if (this.taildropReceive.state === 'awaiting_gallery_save' ||
+      this.taildropReceive.state === 'awaiting_text_preview') {
+      return;
+    }
+    if (this.taildropReceiveStateStartedAtMs <= 0) {
+      this.taildropReceiveStateStartedAtMs = Date.now();
+      return;
+    }
+    const timeoutMs: number = this.taildropReceive.state === 'requesting' ||
+      this.taildropReceive.state === 'deleting' ?
+      TAILDROP_RECEIVE_BACKEND_TIMEOUT_MS : TAILDROP_SAVE_TIMEOUT_MS;
+    if (Date.now() - this.taildropReceiveStateStartedAtMs < timeoutMs) {
+      return;
+    }
+    this.recordDiagnosticEvent('taildrop_receive_timeout', this.taildropReceive.state);
+    if (this.taildropReceiveStrategy === 'media-prefetch') {
+      this.failTaildropMediaPrefetch('timeout');
+      return;
+    }
+    if (this.taildropReceive.state === 'saving_gallery' &&
+      this.taildropReceiveMediaType !== undefined && this.taildropReceive.path.length > 0) {
+      this.taildropMediaSaveInProgress = false;
+      this.taildropPickerOpen = false;
+      this.taildropReceiveResponseInFlight = false;
+      this.taildropReceive = {
+        requestId: this.taildropReceive.requestId, action: 'stage', state: 'awaiting_gallery_save',
+        reason: '', name: this.taildropReceive.name, size: this.taildropReceive.size,
+        path: this.taildropReceive.path
+      };
+      this.taildropReceiveStateStartedAtMs = 0;
+      this.showToast($r('app.string.transfer_save_timeout'));
+      return;
+    }
+    if (this.taildropReceive.state === 'deleting' && this.taildropReceiveStrategy !== 'discard') {
+      this.failTaildropReceive('delete_failed');
+      return;
+    }
+    this.failTaildropReceive('timeout');
   }
 
   private processTaildropReceiveResponse(): void {
@@ -4012,6 +5158,68 @@ export struct BridgeStatus {
       return;
     }
     if (result.action === 'stage' && result.state === 'staged') {
+      if (this.taildropReceiveStrategy === 'media-prefetch') {
+        const mediaType: photoAccessHelper.PhotoType | undefined = this.taildropReceiveMediaType;
+        const mediaPath: string | undefined = this.prepareTaildropMediaForSave(result);
+        if (mediaType === undefined || mediaPath === undefined) {
+          this.failTaildropMediaPrefetch('export_failed');
+          return;
+        }
+        const thumbnailPath: string = await this.createTaildropThumbnail(
+          mediaPath, `${this.taildropInboxRoot()}/${result.requestId}-thumb.jpg`);
+        if (thumbnailPath.length === 0) {
+          try {
+            if (fileIo.accessSync(mediaPath)) {
+              fileIo.unlinkSync(mediaPath);
+            }
+          } catch (_error) {
+          }
+          this.failTaildropMediaPrefetch('thumbnail_failed');
+          return;
+        }
+        this.removeTaildropMediaPreview(result.name, result.size, true);
+        const preview: TaildropMediaPreview = {
+          requestId: result.requestId,
+          name: result.name,
+          size: result.size,
+          path: mediaPath,
+          thumbnailPath: thumbnailPath,
+          mediaType: mediaType
+        };
+        this.taildropMediaPreviews = this.taildropMediaPreviews.concat([preview]);
+        this.taildropAutoPrefetchKey = '';
+        this.persistTaildropInbox();
+        this.notifyCacheContentsChanged();
+        this.recordDiagnosticEvent('taildrop_media_preview_ready', result.name);
+        this.resetTaildropReceiveOperation();
+        if (!this.resumePendingTaildropAction()) {
+          this.prefetchTaildropImage(this.taildropWaitingFiles);
+        }
+        return;
+      }
+      if (this.taildropReceiveStrategy === 'file-prefetch') {
+        const cached: TaildropCachedFile = {
+          requestId: result.requestId,
+          name: result.name,
+          size: result.size,
+          path: result.path
+        };
+        if (!this.validTaildropCachedFile(cached)) {
+          this.failTaildropMediaPrefetch('export_failed');
+          return;
+        }
+        this.removeTaildropCachedFile(result.name, result.size, true);
+        this.taildropCachedFiles = this.taildropCachedFiles.concat([cached]);
+        this.taildropAutoPrefetchKey = '';
+        this.persistTaildropInbox();
+        this.notifyCacheContentsChanged();
+        this.recordDiagnosticEvent('taildrop_file_cache_ready', result.name);
+        this.resetTaildropReceiveOperation();
+        if (!this.resumePendingTaildropAction()) {
+          this.prefetchTaildropImage(this.taildropWaitingFiles);
+        }
+        return;
+      }
       if (this.taildropReceiveMediaType !== undefined) {
         const mediaPath: string | undefined = this.prepareTaildropMediaForSave(result);
         if (mediaPath === undefined) {
@@ -4022,15 +5230,49 @@ export struct BridgeStatus {
           requestId: result.requestId, action: 'stage', state: 'awaiting_gallery_save', reason: '',
           name: result.name, size: result.size, path: mediaPath
         };
+        this.taildropReceiveStateStartedAtMs = 0;
         this.recordDiagnosticEvent('taildrop_media_ready_for_save', 'transfer');
         this.showToast($r('app.string.transfer_media_ready_to_save'));
+        return;
+      }
+      if (this.taildropReceiveStrategy === 'text-preview') {
+        const content: string | undefined = this.readTaildropTextPreview(result);
+        if (content === undefined) {
+          this.failTaildropReceive('export_failed');
+          return;
+        }
+        this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseOut }, () => {
+          this.taildropReceive = {
+            requestId: result.requestId, action: 'stage', state: 'awaiting_text_preview', reason: '',
+            name: result.name, size: result.size, path: result.path
+          };
+          this.taildropReceivedText = content;
+        });
+        this.taildropReceiveStateStartedAtMs = 0;
+        this.taildropTextPreviewVisible = false;
+        this.recordDiagnosticEvent('taildrop_text_preview_ready', 'transfer');
         return;
       }
       this.taildropReceive = {
         requestId: result.requestId, action: 'stage', state: 'exporting', reason: '', name: result.name,
         size: result.size, path: result.path
       };
+      this.taildropReceiveStateStartedAtMs = Date.now();
+      if (this.taildropReceiveStrategy === 'file') {
+        const destinationUri: string = await this.selectTaildropReceiveDestination(result);
+        if (!this.isCurrentTaildropReceive(result.requestId, 'stage', 'exporting')) {
+          return;
+        }
+        if (destinationUri.length === 0) {
+          this.resetTaildropReceiveOperation();
+          return;
+        }
+        this.taildropReceiveDestinationUri = destinationUri;
+      }
       const handled: boolean = await this.handleTaildropStagedFile(result);
+      if (!this.isCurrentTaildropReceive(result.requestId, 'stage', 'exporting')) {
+        return;
+      }
       if (!handled) {
         this.failTaildropReceive('export_failed');
         return;
@@ -4051,19 +5293,29 @@ export struct BridgeStatus {
         this.failTaildropReceive('clear_failed');
         return;
       }
-      this.taildropWaitingFiles = [];
-      this.taildropInboxReason = '';
+      const requestedFromSettings: boolean = this.cacheClearRequestedFromSettings;
+      this.clearTaildropInboxViewState();
       this.recordDiagnosticEvent('taildrop_receive_cache_cleared', 'transfer');
-      this.showToast($r('app.string.transfer_cache_cleared'));
       this.resetTaildropReceiveOperation();
+      if (requestedFromSettings) {
+        this.finishSettingsCacheClear(true);
+      } else {
+        this.notifyCacheContentsChanged();
+        this.showToast($r('app.string.transfer_cache_cleared'));
+      }
       return;
     }
     this.failTaildropReceive('invalid_result');
   }
 
+  private isCurrentTaildropReceive(requestId: number, action: string, state: string): boolean {
+    return this.taildropReceiveInProgress && this.taildropReceive.requestId === requestId &&
+      this.taildropReceive.action === action && this.taildropReceive.state === state;
+  }
+
   private prepareTaildropMediaForSave(result: TaildropReceiveResult): string | undefined {
     const safeName: string = this.sanitizeTaildropFileName(result.name, 0);
-    const mediaPath: string = `${this.taildropInboxRoot()}/${safeName}`;
+    const mediaPath: string = `${this.taildropInboxRoot()}/${result.requestId}-${safeName}`;
     try {
       if (fileIo.accessSync(mediaPath)) {
         fileIo.unlinkSync(mediaPath);
@@ -4088,6 +5340,7 @@ export struct BridgeStatus {
       requestId: requestId, action: 'delete', state: 'deleting', reason: '', name: name,
       size: size, path: ''
     };
+    this.taildropReceiveStateStartedAtMs = Date.now();
     if (!this.writeAtomicTaildropRequest(this.taildropReceiveRequestPath(), requestId,
       JSON.stringify(deleteRequest))) {
       this.failTaildropReceive('delete_failed');
@@ -4095,29 +5348,179 @@ export struct BridgeStatus {
   }
 
   private handleTaildropMediaSaveClick(result: SaveButtonOnClickResult): void {
-    if (result === SaveButtonOnClickResult.CANCELED_BY_USER) {
+    if (!this.validateTaildropMediaSaveAuthorization(result)) {
       return;
+    }
+    this.startTaildropMediaSave();
+  }
+
+  private handlePreparedTaildropMediaSaveClick(
+    file: TaildropWaitingFileSummary,
+    result: SaveButtonOnClickResult
+  ): void {
+    if (!this.validateTaildropMediaSaveAuthorization(result)) {
+      return;
+    }
+    const preview: TaildropMediaPreview | undefined = this.findTaildropMediaPreview(file);
+    if (preview === undefined) {
+      return;
+    }
+    this.interruptTaildropMediaPrefetch();
+    if (this.taildropReceiveInProgress) {
+      if (this.taildropReceive.name === file.name &&
+        this.taildropReceive.state === 'awaiting_gallery_save') {
+        this.startTaildropMediaSave();
+        return;
+      }
+      if (this.taildropReceive.state === 'awaiting_text_preview') {
+        this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseInOut }, () => {
+          this.resetTaildropReceiveOperation();
+        });
+        this.startPreparedTaildropMediaSave(file);
+        return;
+      }
+      this.taildropPendingMediaSave = file;
+      this.recordDiagnosticEvent('taildrop_media_save_queued', 'transfer');
+      return;
+    }
+    this.startPreparedTaildropMediaSave(file);
+  }
+
+  private startPreparedTaildropFileSave(file: TaildropWaitingFileSummary): void {
+    const cached: TaildropCachedFile | undefined = this.findTaildropCachedFile(file);
+    if (cached === undefined) {
+      if (this.taildropState !== 'ready') {
+        this.showToast($r('app.string.transfer_connect_first_title'));
+      } else {
+        this.startTaildropReceive(file);
+      }
+      return;
+    }
+    if (this.taildropSendActive() || this.taildropReceiveInProgress) {
+      this.showToast($r('app.string.transfer_busy_message'));
+      return;
+    }
+    this.taildropReceiveStrategy = 'file';
+    this.taildropReceiveExpectedSize = cached.size;
+    this.taildropReceiveInProgress = true;
+    this.taildropReceive = {
+      requestId: cached.requestId,
+      action: 'stage',
+      state: 'selecting_destination',
+      reason: '',
+      name: cached.name,
+      size: cached.size,
+      path: cached.path
+    };
+    this.selectTaildropReceiveDestination(this.taildropReceive).then((destinationUri: string) => {
+      if (!this.isCurrentTaildropReceive(cached.requestId, 'stage', 'selecting_destination')) {
+        return;
+      }
+      if (destinationUri.length === 0) {
+        this.resetTaildropReceiveOperation();
+        return;
+      }
+      this.taildropReceiveDestinationUri = destinationUri;
+      this.taildropReceive = {
+        requestId: cached.requestId,
+        action: 'stage',
+        state: 'exporting',
+        reason: '',
+        name: cached.name,
+        size: cached.size,
+        path: cached.path
+      };
+      this.copyTaildropStagedFile(cached.path, destinationUri, cached.size).then((saved: boolean) => {
+        if (!this.isCurrentTaildropReceive(cached.requestId, 'stage', 'exporting')) {
+          return;
+        }
+        if (!saved) {
+          this.failTaildropReceive('export_failed');
+          return;
+        }
+        if (this.taildropState === 'ready') {
+          this.requestTaildropReceiveDelete(cached.requestId, cached.name, cached.size);
+        } else {
+          this.completeTaildropReceive();
+        }
+      }).catch(() => this.failTaildropReceive('export_failed'));
+    }).catch(() => this.failTaildropReceive('export_failed'));
+  }
+
+  private startPreparedTaildropMediaSave(file: TaildropWaitingFileSummary): void {
+    const preview: TaildropMediaPreview | undefined = this.findTaildropMediaPreview(file);
+    if (preview === undefined || this.taildropReceiveInProgress) {
+      return;
+    }
+    this.taildropReceiveStrategy = 'media';
+    this.taildropReceiveDestinationUri = '';
+    this.taildropReceiveExpectedSize = preview.size;
+    this.taildropReceiveMediaType = preview.mediaType;
+    this.taildropReceiveInProgress = true;
+    this.taildropReceive = {
+      requestId: preview.requestId,
+      action: 'stage',
+      state: 'awaiting_gallery_save',
+      reason: '',
+      name: preview.name,
+      size: preview.size,
+      path: preview.path
+    };
+    this.taildropReceiveStateStartedAtMs = 0;
+    this.startTaildropMediaSave();
+  }
+
+  private validateTaildropMediaSaveAuthorization(result: SaveButtonOnClickResult): boolean {
+    if (result === SaveButtonOnClickResult.CANCELED_BY_USER) {
+      return false;
     }
     if (result !== SaveButtonOnClickResult.SUCCESS) {
+      this.recordDiagnosticEvent('taildrop_media_save_authorization_failed', `${result}`);
       this.showToast($r('app.string.transfer_media_save_authorization_failed'));
+      return false;
+    }
+    return true;
+  }
+
+  private startTaildropMediaSave(): void {
+    if (this.taildropMediaSaveInProgress || this.taildropReceive.state !== 'awaiting_gallery_save') {
       return;
     }
-    this.saveTaildropMediaToGallery().catch(() => {
-      this.restoreTaildropMediaSaveAfterFailure();
+    this.taildropMediaSaveInProgress = true;
+    this.saveTaildropMediaToGallery().then((saved: boolean) => {
+      if (!saved) {
+        this.restoreTaildropMediaSaveAfterFailure(false);
+      }
+    }).catch((error: BusinessError) => {
+      this.recordDiagnosticEvent('taildrop_media_save_failed', 'gallery_dialog', error.code ?? -1);
+      this.restoreTaildropMediaSaveAfterFailure(true);
+    }).finally(() => {
+      this.taildropMediaSaveInProgress = false;
     });
   }
 
   private cancelTaildropMediaSave(): void {
-    if (this.taildropReceive.state !== 'awaiting_gallery_save') {
+    if (this.taildropMediaSaveInProgress || this.taildropReceive.state !== 'awaiting_gallery_save') {
       return;
     }
     this.recordDiagnosticEvent('taildrop_media_save_cancelled', 'transfer');
     this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
   }
 
-  private restoreTaildropMediaSaveAfterFailure(): void {
-    if (this.taildropReceive.path.length === 0) {
-      this.failTaildropReceive('export_failed');
+  private cancelTaildropReceiveOperation(): void {
+    if (!this.taildropReceiveInProgress) {
+      return;
+    }
+    this.recordDiagnosticEvent('taildrop_receive_cancelled', this.taildropReceive.state);
+    this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
+    this.showToast($r('app.string.transfer_receive_cancelled'));
+  }
+
+  private restoreTaildropMediaSaveAfterFailure(showFailure: boolean): void {
+    if (!this.taildropMediaSaveInProgress || this.taildropReceive.state !== 'saving_gallery' ||
+      this.taildropReceive.path.length === 0) {
       return;
     }
     this.taildropReceive = {
@@ -4129,37 +5532,45 @@ export struct BridgeStatus {
       size: this.taildropReceive.size,
       path: this.taildropReceive.path
     };
-    this.showToast($r('app.string.transfer_media_save_failed'));
+    if (showFailure) {
+      this.showToast($r('app.string.transfer_media_save_failed'));
+    }
   }
 
-  private async saveTaildropMediaToGallery(): Promise<void> {
+  private async saveTaildropMediaToGallery(): Promise<boolean> {
     const mediaType: photoAccessHelper.PhotoType | undefined = this.taildropReceiveMediaType;
     const staged: TaildropReceiveResult = this.taildropReceive;
-    if (mediaType === undefined || staged.state !== 'awaiting_gallery_save' || staged.path.length === 0) {
-      return;
+    const extension: string = this.taildropFileExtension(staged.name);
+    if (mediaType === undefined || extension.length === 0 ||
+      staged.state !== 'awaiting_gallery_save' || staged.path.length === 0) {
+      return false;
     }
     const stat: fileIo.Stat = fileIo.statSync(staged.path);
     if (!stat.isFile() || stat.size !== staged.size) {
       this.failTaildropReceive('export_failed');
-      return;
+      return false;
     }
     this.taildropReceive = {
       requestId: staged.requestId, action: 'stage', state: 'saving_gallery', reason: '',
       name: staged.name, size: staged.size, path: staged.path
     };
+    this.taildropReceiveStateStartedAtMs = Date.now();
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const phAccessHelper = photoAccessHelper.getPhotoAccessHelper(context);
     const sourceUri: string = fileUri.getUriFromPath(staged.path);
     const changeRequest: photoAccessHelper.MediaAssetChangeRequest =
       mediaType === photoAccessHelper.PhotoType.IMAGE ?
         photoAccessHelper.MediaAssetChangeRequest.createImageAssetRequest(context, sourceUri) :
         photoAccessHelper.MediaAssetChangeRequest.createVideoAssetRequest(context, sourceUri);
-    const phAccessHelper = photoAccessHelper.getPhotoAccessHelper(context);
-    try {
-      await phAccessHelper.applyChanges(changeRequest);
-    } catch (_error) {
-      this.restoreTaildropMediaSaveAfterFailure();
-      return;
+    await phAccessHelper.applyChanges(changeRequest);
+    if (!this.isCurrentTaildropReceive(staged.requestId, 'stage', 'saving_gallery')) {
+      return false;
     }
+    if (mediaType === photoAccessHelper.PhotoType.IMAGE) {
+      this.taildropReceivePreviewPath = await this.createTaildropHistoryPreview(
+        staged.path, staged.name, staged.requestId);
+    }
+    this.removeTaildropMediaPreview(staged.name, staged.size, true);
     try {
       if (fileIo.accessSync(staged.path)) {
         fileIo.unlinkSync(staged.path);
@@ -4168,7 +5579,12 @@ export struct BridgeStatus {
       // The receive operation reset retries cleanup after the remote inbox entry is deleted.
     }
     this.recordDiagnosticEvent('taildrop_media_saved_to_gallery', 'transfer');
-    this.requestTaildropReceiveDelete(staged.requestId, staged.name, staged.size);
+    if (this.taildropState === 'ready') {
+      this.requestTaildropReceiveDelete(staged.requestId, staged.name, staged.size);
+    } else {
+      this.completeTaildropReceive();
+    }
+    return true;
   }
 
   private clearLocalTaildropInboxCache(): boolean {
@@ -4191,6 +5607,7 @@ export struct BridgeStatus {
           cleared = false;
         }
       });
+      this.notifyCacheContentsChanged();
       return cleared;
     } catch (_error) {
       return false;
@@ -4227,11 +5644,12 @@ export struct BridgeStatus {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const helper = photoAccessHelper.getPhotoAccessHelper(context);
       const configs: photoAccessHelper.PhotoCreationConfig[] = [{
-        title: this.taildropFileTitle(result.name),
+        title: this.taildropGalleryAssetTitle(result.name),
         fileNameExtension: extension,
         photoType: photoAccessHelper.PhotoType.IMAGE
       }];
-      const destinationUris: string[] = await helper.showAssetsCreationDialog([result.path], configs);
+      const sourceUri: string = fileUri.getUriFromPath(result.path);
+      const destinationUris: string[] = await helper.showAssetsCreationDialog([sourceUri], configs);
       if (destinationUris.length === 0) {
         return false;
       }
@@ -4258,23 +5676,46 @@ export struct BridgeStatus {
 
   private async copyTaildropStagedFile(sourcePath: string, destinationUri: string,
     expectedSize: number): Promise<boolean> {
+    let source: fileIo.File | undefined = undefined;
     let destination: fileIo.File | undefined = undefined;
+    let verifier: fileIo.File | undefined = undefined;
     let copied: boolean = false;
     try {
       if (destinationUri.length === 0) {
         copied = false;
       } else {
+        source = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
         destination = fileIo.openSync(destinationUri,
-          fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.TRUNC);
-        await fileIo.copyFile(sourcePath, destination.fd);
-        copied = fileIo.statSync(destination.fd).size === expectedSize;
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        await fileIo.copyFile(source.fd, destination.fd);
+        fileIo.closeSync(source);
+        source = undefined;
+        fileIo.closeSync(destination);
+        destination = undefined;
+        verifier = fileIo.openSync(destinationUri, fileIo.OpenMode.READ_ONLY);
+        const stat: fileIo.Stat = fileIo.statSync(verifier.fd);
+        copied = stat.isFile() && stat.size === expectedSize;
       }
     } catch (_error) {
       copied = false;
     }
+    if (source !== undefined) {
+      try {
+        fileIo.closeSync(source);
+      } catch (_error) {
+        copied = false;
+      }
+    }
     if (destination !== undefined) {
       try {
         fileIo.closeSync(destination);
+      } catch (_error) {
+        copied = false;
+      }
+    }
+    if (verifier !== undefined) {
+      try {
+        fileIo.closeSync(verifier);
       } catch (_error) {
         copied = false;
       }
@@ -4304,6 +5745,7 @@ export struct BridgeStatus {
       fileName: this.taildropReceive.name,
       fileCount: 1,
       totalBytes: this.taildropReceive.size > 0 ? this.taildropReceive.size : this.taildropReceiveExpectedSize,
+      previewPath: this.taildropReceivePreviewPath,
       completedAtMs: Date.now()
     };
     this.taildropHistory = [record].concat(this.taildropHistory).slice(0, TAILDROP_HISTORY_LIMIT);
@@ -4312,44 +5754,84 @@ export struct BridgeStatus {
 
   private completeTaildropReceive(): void {
     const receivedName: string = this.taildropReceive.name;
+    const receivedSize: number = this.taildropReceive.size;
     const receiveStrategy: string = this.taildropReceiveStrategy;
     this.addTaildropReceiveRecord('completed', '');
+    this.removeTaildropMediaPreview(receivedName, receivedSize, true);
+    this.removeTaildropCachedFile(receivedName, receivedSize, true);
     this.taildropWaitingFiles = this.taildropWaitingFiles.filter(
       (file: TaildropWaitingFileSummary) => file.name !== receivedName);
+    this.persistTaildropInbox();
     this.recordDiagnosticEvent('taildrop_receive_completed', 'transfer');
-    if (receiveStrategy === 'image') {
+    if (receiveStrategy === 'image' ||
+      (receiveStrategy === 'media' && this.taildropReceiveMediaType === photoAccessHelper.PhotoType.IMAGE)) {
       this.showToast($r('app.string.transfer_image_saved'));
-    } else if (receiveStrategy === 'text') {
+    } else if (receiveStrategy === 'text' || receiveStrategy === 'text-preview') {
       this.showToast($r('app.string.transfer_text_copied'));
     } else {
       this.showToast($r('app.string.transfer_receive_completed'));
     }
     this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
+    this.notifyCacheContentsChanged();
   }
 
   private completeTaildropDiscard(): void {
     const discardedName: string = this.taildropReceive.name;
+    this.removeTaildropMediaPreview(discardedName, this.taildropReceive.size, true);
+    this.removeTaildropCachedFile(discardedName, this.taildropReceive.size, true);
     this.taildropWaitingFiles = this.taildropWaitingFiles.filter(
       (file: TaildropWaitingFileSummary) => file.name !== discardedName);
+    this.persistTaildropInbox();
     this.recordDiagnosticEvent('taildrop_receive_discarded', 'transfer');
     this.showToast($r('app.string.transfer_discard_completed'));
     this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
+    this.notifyCacheContentsChanged();
   }
 
   private failTaildropReceive(reason: string): void {
+    if (this.taildropReceiveStrategy === 'media-prefetch' ||
+      this.taildropReceiveStrategy === 'file-prefetch') {
+      this.failTaildropMediaPrefetch(reason);
+      return;
+    }
+    const settingsCacheClearFailed: boolean =
+      this.cacheClearRequestedFromSettings && this.taildropReceive.action === 'clear';
     if (this.taildropReceive.requestId > 0 && this.taildropReceive.action !== 'clear') {
       this.addTaildropReceiveRecord('failed', reason);
     }
     this.recordDiagnosticEvent('taildrop_receive_failed', reason);
-    this.showToast(this.taildropReceiveFailureMessage(reason));
+    if (!settingsCacheClearFailed) {
+      this.showToast(this.taildropReceiveFailureMessage(reason));
+    }
     this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
+    if (settingsCacheClearFailed) {
+      this.finishSettingsCacheClear(false);
+    }
+  }
+
+  private failTaildropMediaPrefetch(reason: string): void {
+    const key: string = this.taildropAutoPrefetchKey;
+    if (key.length > 0 && !this.taildropAutoPrefetchFailedKeys.includes(key)) {
+      this.taildropAutoPrefetchFailedKeys = this.taildropAutoPrefetchFailedKeys.concat([key]);
+    }
+    this.recordDiagnosticEvent('taildrop_media_preview_failed', reason);
+    this.taildropAutoPrefetchKey = '';
+    this.resetTaildropReceiveOperation();
+    this.resumePendingTaildropAction();
   }
 
   private resetTaildropReceiveOperation(): void {
-    if (this.taildropReceive.path.length > 0) {
+    const receivePath: string = this.taildropReceive.path;
+    const pathIsCachedPreview: boolean = this.taildropMediaPreviews.some(
+      (preview: TaildropMediaPreview) => preview.path === receivePath) ||
+      this.taildropCachedFiles.some((cached: TaildropCachedFile) => cached.path === receivePath);
+    if (receivePath.length > 0 && !pathIsCachedPreview) {
       try {
-        if (fileIo.accessSync(this.taildropReceive.path)) {
-          fileIo.unlinkSync(this.taildropReceive.path);
+        if (fileIo.accessSync(receivePath)) {
+          fileIo.unlinkSync(receivePath);
         }
       } catch (_error) {
         // Extension startup cleanup removes any staged export left behind.
@@ -4357,11 +5839,18 @@ export struct BridgeStatus {
     }
     this.taildropReceiveInProgress = false;
     this.taildropReceiveRouting = false;
+    this.taildropReceiveResponseInFlight = false;
+    this.taildropMediaSaveInProgress = false;
+    this.taildropPickerOpen = false;
+    this.taildropReceiveStateStartedAtMs = 0;
     this.taildropReceiveDestinationUri = '';
     this.taildropReceiveExpectedSize = 0;
     this.taildropReceiveMediaType = undefined;
+    this.taildropReceivePreviewPath = '';
     this.taildropReceiveStrategy = 'none';
     this.taildropReceive = emptyTaildropReceive();
+    this.taildropReceivedText = '';
+    this.taildropTextPreviewVisible = false;
   }
 
   private taildropReceiveFailureMessage(reason: string): ResourceStr {
@@ -4373,6 +5862,9 @@ export struct BridgeStatus {
     }
     if (reason === 'no_space') {
       return $r('app.string.transfer_receive_no_space');
+    }
+    if (reason === 'timeout') {
+      return $r('app.string.transfer_save_timeout');
     }
     if (reason === 'delete_failed') {
       return this.taildropReceiveStrategy === 'discard' ?
@@ -5290,10 +6782,11 @@ export struct BridgeStatus {
   @Builder
   private LocalDeviceRow() {
     Row({ space: 10 }) {
-      Stack({ alignContent: Alignment.BottomEnd }) {
+      Stack({ alignContent: Alignment.Center }) {
         Image(this.localDeviceIcon())
           .width(19)
           .height(19)
+          .objectFit(ImageFit.Contain)
           .fillColor($r('sys.color.icon_primary'))
         Row()
           .width(8)
@@ -5301,6 +6794,7 @@ export struct BridgeStatus {
           .borderRadius(4)
           .border({ width: 2, color: this.groupBackground() })
           .backgroundColor(this.connectionColor())
+          .align(Alignment.BottomEnd)
       }
       .width(36)
       .height(36)
@@ -5410,10 +6904,11 @@ export struct BridgeStatus {
     Column({ space: 0 }) {
       Divider().color($r('sys.color.comp_divider'))
       Row({ space: 10 }) {
-        Stack({ alignContent: Alignment.BottomEnd }) {
+        Stack({ alignContent: Alignment.Center }) {
           Image(this.peerDeviceIcon(peer.deviceType))
-          .width(19)
-          .height(19)
+            .width(19)
+            .height(19)
+            .objectFit(ImageFit.Contain)
             .fillColor($r('sys.color.icon_primary'))
           Row()
             .width(8)
@@ -5422,6 +6917,7 @@ export struct BridgeStatus {
             .border({ width: 2, color: this.groupBackground() })
             .backgroundColor(peer.online ? $r('app.color.status_success') :
               $r('app.color.status_offline'))
+            .align(Alignment.BottomEnd)
         }
         .width(36)
         .height(36)
@@ -5609,8 +7105,6 @@ export struct BridgeStatus {
     .width('100%')
     .constraintSize({ minHeight: 64 })
     .padding(12)
-    .backgroundColor(this.groupBackground())
-    .borderRadius(12)
   }
 
   @Builder
@@ -5644,13 +7138,59 @@ export struct BridgeStatus {
     .width('100%')
     .constraintSize({ minHeight: 50 })
     .padding(12)
+  }
+
+  @Builder
+  private AppearanceSettingsPanel() {
+    Column({ space: 0 }) {
+      this.GlowSettingsPanel()
+      Divider()
+        .color($r('sys.color.comp_divider'))
+        .margin({ left: 12, right: 12 })
+      this.HomeLayoutSettingsPanel()
+    }
+    .id('appearance-settings')
+    .width('100%')
+    .backgroundColor(this.groupBackground())
+    .borderRadius(12)
+    .clip(true)
+  }
+
+  @Builder
+  private CacheSettingsPanel() {
+    Row({ space: 10 }) {
+      Text($r('app.string.settings_cache_title'))
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.font_primary'))
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      Text(this.cacheSizeLabel())
+        .fontSize(12)
+        .fontColor($r('sys.color.font_secondary'))
+        .maxLines(1)
+
+      Text($r('app.string.settings_clear_cache_action'))
+        .id('settings-clear-cache')
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.font_emphasize'))
+        .opacity(this.cacheClearEnabled() ? 1 : 0.42)
+        .onClick(() => this.confirmClearAppCache())
+    }
+    .id('cache-settings')
+    .width('100%')
+    .constraintSize({ minHeight: 50 })
+    .padding(12)
     .backgroundColor(this.groupBackground())
     .borderRadius(12)
   }
 
   @Builder
   private AccountPanel() {
-    Column({ space: 8 }) {
+    Column({ space: 6 }) {
       Column({ space: 6 }) {
         Row({ space: 8 }) {
           Text($r('app.string.control_server_title'))
@@ -5778,34 +7318,34 @@ export struct BridgeStatus {
         }
         .width('100%')
       } else {
-        Row({ space: 12 }) {
+        Row({ space: 10 }) {
           Stack() {
             if (this.accountSummary.profilePicURL.length > 0 && !this.avatarLoadFailed) {
               Image(this.accountSummary.profilePicURL)
                 .id('account-avatar')
-                .width(48)
-                .height(48)
-                .borderRadius(24)
+                .width(40)
+                .height(40)
+                .borderRadius(20)
                 .objectFit(ImageFit.Cover)
                 .onError(() => {
                   this.avatarLoadFailed = true;
                 })
             } else {
               Text(this.accountInitial())
-                .fontSize(22)
+                .fontSize(18)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('sys.color.font_emphasize'))
             }
           }
-          .width(48)
-          .height(48)
-          .borderRadius(24)
+          .width(40)
+          .height(40)
+          .borderRadius(20)
           .backgroundColor(this.secondaryBackground())
 
           Column({ space: 2 }) {
             Text(this.accountSummary.displayName)
               .id('account-display-name')
-              .fontSize(16)
+              .fontSize(15)
               .fontWeight(FontWeight.Medium)
               .fontColor($r('sys.color.font_primary'))
               .maxLines(1)
@@ -5813,7 +7353,7 @@ export struct BridgeStatus {
               .width('100%')
             Text(this.accountSummary.loginName)
               .id('account-login-name')
-              .fontSize(13)
+              .fontSize(12)
               .fontColor($r('sys.color.font_secondary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -5828,7 +7368,7 @@ export struct BridgeStatus {
         this.AccountDetailRow($r('app.string.account_tailnet'),
           this.accountSummary.tailnetName, 'account-tailnet')
         this.AccountDetailRow($r('app.string.account_device'),
-          this.accountSummary.deviceName, 'account-device')
+          this.localDeviceName(), 'account-device')
 
         if (!this.isConnected()) {
           Text($r('app.string.logout_description'))
@@ -5844,6 +7384,7 @@ export struct BridgeStatus {
           })
             .id('logout-open')
             .width('100%')
+            .height(40)
             .visualEffect(new hdsEffect.HdsEffectBuilder()
               .pressShadow(hdsEffect.PressShadowType.BLEND_WHITE)
               .buildEffect())
@@ -5860,7 +7401,7 @@ export struct BridgeStatus {
       }
     }
     .width('100%')
-    .padding(14)
+    .padding(12)
     .backgroundColor(this.groupBackground())
     .borderRadius(14)
   }
@@ -5882,7 +7423,7 @@ export struct BridgeStatus {
         .layoutWeight(1)
     }
     .width('100%')
-    .constraintSize({ minHeight: 38 })
+    .constraintSize({ minHeight: 34 })
     .onClick(() => {
       if (action !== undefined) {
         action();
@@ -5990,6 +7531,9 @@ export struct BridgeStatus {
       this.StandardActionButton($r('app.string.diagnostic_force_vpn_stop_action'),
         'diagnostic-force-vpn-stop', false, !this.diagnosticActionInProgress,
         () => this.forceStopSystemVpn())
+      this.StandardActionButton($r('app.string.diagnostic_simulate_crash_action'),
+        'diagnostic-simulate-crash', false, !this.diagnosticActionInProgress,
+        () => this.confirmSimulateAppCrash())
       if (this.diagnosticActionStatus.length > 0) {
         this.DiagnosticStatus($r('app.string.diagnostic_action_status'),
           this.diagnosticActionStatus, 'diagnostic-action-status')
@@ -6207,13 +7751,7 @@ export struct BridgeStatus {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
 
-        if (target.online && this.isConnected() && this.taildropState === 'ready') {
-          SymbolGlyph($r('sys.symbol.chevron_down'))
-            .fontSize(18)
-            .fontColor([$r('sys.color.icon_secondary')])
-            .rotate({ angle: this.expandedTaildropTargetKey === target.key ? 180 : 0 })
-            .animation({ duration: 180, curve: Curve.EaseInOut })
-        } else if (!target.online) {
+        if (!target.online) {
           Text($r('app.string.peer_offline'))
             .fontSize(11)
             .fontColor($r('sys.color.font_secondary'))
@@ -6222,50 +7760,51 @@ export struct BridgeStatus {
       .width('100%')
       .constraintSize({ minHeight: 54 })
       .padding({ left: 12, right: 12 })
-      .onClick(() => {
-        if (target.online && !this.taildropSendActive()) {
-          this.toggleTaildropSourceChooser(target);
-        }
-      })
-
-      if (target.online && this.isConnected() && this.taildropState === 'ready' &&
-        this.expandedTaildropTargetKey === target.key) {
-        Column() {
-          Row({ space: 0 }) {
-            this.PeerActionSegment($r('app.string.transfer_file_action'),
-              'taildrop-file-' + target.key, true, false,
-              () => this.chooseTaildropDocuments(target))
-            Divider()
-              .vertical(true)
-              .height(18)
-              .color($r('sys.color.comp_divider'))
-            this.PeerActionSegment($r('app.string.transfer_photo_action'),
-              'taildrop-media-' + target.key, true, false,
-              () => this.chooseTaildropPhotos(target))
-            Divider()
-              .vertical(true)
-              .height(18)
-              .color($r('sys.color.comp_divider'))
-            this.PeerActionSegment($r('app.string.transfer_text_action'),
-              'taildrop-text-' + target.key, true, false,
-              () => this.chooseTaildropText(target))
-          }
-          .width('100%')
-          .height(36)
-          .alignItems(VerticalAlign.Center)
-          .backgroundColor(this.secondaryBackground())
-          .borderRadius(18)
-          .clip(true)
+      if (target.online) {
+        Row() {
+          this.TaildropFileMediaCapsule(target)
         }
         .width('100%')
-        .padding({ left: 62, right: 12, bottom: 10 })
+        .padding({ left: 12, right: 12, bottom: 8 })
+      }
+      if (this.taildropTextEditorVisible && this.taildropTextTarget !== undefined &&
+        this.taildropTextTarget.key === target.key) {
+        this.TaildropTextEditorSheet()
       }
     }
     .id('taildrop-target-' + target.key)
     .width('100%')
-    .opacity(target.online && this.isConnected() && this.taildropState === 'ready' &&
-      !this.taildropSendActive() ? 1 : 0.42)
+    .opacity(target.online ? 1 : 0.42)
     .animation({ duration: 260, curve: Curve.EaseInOut })
+  }
+
+  @Builder
+  private TaildropFileMediaCapsule(target: TaildropTargetSummary) {
+    Row({ space: 0 }) {
+      this.PeerActionSegment($r('app.string.transfer_file_action'),
+        'taildrop-file-' + target.key, target.online && this.taildropContentChoiceEnabled(), false,
+        () => this.chooseTaildropDocuments(target))
+      Divider()
+        .vertical(true)
+        .height(18)
+        .color($r('sys.color.comp_divider'))
+      this.PeerActionSegment($r('app.string.transfer_photo_action'),
+        'taildrop-media-' + target.key, target.online && this.taildropContentChoiceEnabled(), false,
+        () => this.chooseTaildropPhotos(target))
+      Divider()
+        .vertical(true)
+        .height(18)
+        .color($r('sys.color.comp_divider'))
+      this.PeerActionSegment($r('app.string.transfer_text_action'),
+        'taildrop-text-' + target.key, target.online && this.taildropContentChoiceEnabled(), false,
+        () => this.chooseTaildropText(target))
+    }
+    .width('100%')
+    .height(36)
+    .alignItems(VerticalAlign.Center)
+    .backgroundColor(this.secondaryBackground())
+    .borderRadius(18)
+    .clip(true)
   }
 
   @Builder
@@ -6337,6 +7876,49 @@ export struct BridgeStatus {
           .enabled(this.taildropTextInput.trim().length > 0)
           .opacity(this.taildropTextInput.trim().length > 0 ? 1 : 0.45)
           .onClick(() => this.sendTaildropText())
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 24 })
+    .backgroundColor($r('sys.color.background_secondary'))
+  }
+
+  @Builder
+  private TaildropTextPreviewSheet() {
+    Column({ space: 12 }) {
+      Text(this.taildropReceive.name)
+        .fontSize(13)
+        .fontColor($r('sys.color.font_secondary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      Scroll() {
+        Text(this.taildropReceivedText)
+          .fontSize(14)
+          .fontColor($r('sys.color.font_primary'))
+          .lineHeight(21)
+          .width('100%')
+          .padding(14)
+          .backgroundColor(this.secondaryBackground())
+          .borderRadius(14)
+      }
+      .width('100%')
+      .height(260)
+      .edgeEffect(EdgeEffect.Spring)
+      Row({ space: 10 }) {
+        Button($r('app.string.cancel_action'))
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.secondaryBackground())
+          .fontColor($r('sys.color.font_primary'))
+          .onClick(() => {
+            this.taildropTextPreviewVisible = false;
+          })
+        Button($r('app.string.transfer_copy_text_action'))
+          .layoutWeight(1)
+          .height(40)
+          .onClick(() => this.copyTaildropTextPreview())
       }
       .width('100%')
     }
@@ -6421,7 +8003,13 @@ export struct BridgeStatus {
   @Builder
   private TaildropActiveReceivePanel() {
     Row({ space: 10 }) {
-      if (this.taildropReceive.state === 'awaiting_gallery_save') {
+      if (this.taildropActiveReceivePreviewUri().length > 0) {
+        Image(this.taildropActiveReceivePreviewUri())
+          .width(44)
+          .height(44)
+          .borderRadius(10)
+          .objectFit(ImageFit.Cover)
+      } else if (this.taildropReceive.state === 'awaiting_gallery_save') {
         SymbolGlyph($r('sys.symbol.doc'))
           .fontSize(22)
           .fontColor([$r('sys.color.icon_emphasize')])
@@ -6456,6 +8044,7 @@ export struct BridgeStatus {
             buttonType: ButtonType.Capsule
           })
             .height(40)
+            .enabled(!this.taildropMediaSaveInProgress)
             .onClick((_event: ClickEvent, result: SaveButtonOnClickResult) => {
               this.handleTaildropMediaSaveClick(result);
             })
@@ -6464,8 +8053,16 @@ export struct BridgeStatus {
             .fontSize(11)
             .fontColor($r('sys.color.font_secondary'))
             .backgroundColor(Color.Transparent)
+            .enabled(!this.taildropMediaSaveInProgress)
             .onClick(() => this.cancelTaildropMediaSave())
         }
+      } else {
+        Button($r('app.string.cancel_action'))
+          .height(36)
+          .fontSize(12)
+          .fontColor($r('sys.color.font_secondary'))
+          .backgroundColor(this.secondaryBackground())
+          .onClick(() => this.cancelTaildropReceiveOperation())
       }
     }
     .width('100%')
@@ -6477,9 +8074,21 @@ export struct BridgeStatus {
   @Builder
   private TaildropWaitingFileRow(file: TaildropWaitingFileSummary) {
     Row({ space: 12 }) {
-      SymbolGlyph($r('sys.symbol.doc'))
-        .fontSize(22)
-        .fontColor([$r('sys.color.icon_emphasize')])
+      Stack({ alignContent: Alignment.Center }) {
+        if (this.taildropWaitingFilePreviewUri(file).length > 0) {
+          Image(this.taildropWaitingFilePreviewUri(file))
+            .width(40)
+            .height(40)
+            .borderRadius(10)
+            .objectFit(ImageFit.Cover)
+        } else {
+          SymbolGlyph(this.taildropFileSymbol(file.name))
+            .fontSize(28)
+            .fontColor([$r('sys.color.icon_emphasize')])
+        }
+      }
+      .width(44)
+      .height(44)
       Column({ space: 2 }) {
         Text(file.name)
           .fontSize(14)
@@ -6488,6 +8097,11 @@ export struct BridgeStatus {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
+          .onClick(() => {
+            if (this.taildropContentKind(file) === 'text') {
+              this.startTaildropTextPreview(file);
+            }
+          })
         Row({ space: 6 }) {
           Text(this.taildropContentKindText(file))
             .fontSize(12)
@@ -6499,27 +8113,148 @@ export struct BridgeStatus {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Row({ space: 12 }) {
-        Text(this.taildropReceiveActionText(file))
-          .fontSize(12)
-          .fontColor($r('sys.color.icon_emphasize'))
-          .onClick(() => {
-            if (this.taildropSendActive()) {
-              this.showToast($r('app.string.transfer_busy_message'));
-              return;
-            }
-            this.startTaildropReceive(file);
+      if (this.taildropReceiveRowLoading(file) && this.taildropContentKind(file) !== 'text') {
+        LoadingProgress()
+          .width(20)
+          .height(20)
+          .color($r('sys.color.icon_emphasize'))
+      } else if (this.isTaildropImageName(file.name)) {
+        Row({ space: 12 }) {
+          SaveButton({
+            icon: SaveIconStyle.LINES,
+            buttonType: ButtonType.Circle
           })
-        Text($r('app.string.transfer_discard_action'))
-          .fontSize(12)
-          .fontColor($r('app.color.status_error'))
-          .onClick(() => this.confirmDiscardTaildropFile(file))
+            .width(32)
+            .height(32)
+            .fontColor($r('sys.color.icon_primary'))
+            .backgroundColor(this.groupBackground())
+            .borderWidth(0)
+            .padding(0)
+            .enabled(this.findTaildropMediaPreview(file) !== undefined &&
+              !(this.taildropReceiveMatches(file) && this.taildropMediaSaveInProgress))
+            .onClick((_event: ClickEvent, result: SaveButtonOnClickResult) => {
+              this.handlePreparedTaildropMediaSaveClick(file, result);
+            })
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            SymbolGlyph($r('sys.symbol.trash'))
+              .fontSize(18)
+              .fontColor([$r('app.color.status_error')])
+          }
+            .width(32)
+            .height(32)
+            .padding(0)
+            .backgroundColor(Color.Transparent)
+            .accessibilityText($r('app.string.transfer_discard_action'))
+            .enabled(!this.taildropReceiveInProgress)
+            .onClick(() => {
+              if (!this.taildropReceiveInProgress) {
+                this.confirmDiscardTaildropFile(file);
+              }
+            })
+        }
+      } else {
+        Row({ space: 12 }) {
+          if (this.taildropContentKind(file) === 'text') {
+            Button({ type: ButtonType.Circle, stateEffect: true }) {
+              if (this.taildropTextPreviewLoading(file)) {
+                LoadingProgress()
+                  .width(18)
+                  .height(18)
+                  .color($r('sys.color.icon_primary'))
+              } else {
+                SymbolGlyph(this.taildropReceiveMatches(file) &&
+                  this.taildropReceive.state === 'awaiting_text_preview' ?
+                  $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                  .fontSize(18)
+                  .fontColor([$r('sys.color.icon_primary')])
+              }
+            }
+              .width(32)
+              .height(32)
+              .padding(0)
+              .backgroundColor(Color.Transparent)
+              .enabled(!this.taildropTextPreviewLoading(file))
+              .accessibilityText(this.taildropReceiveMatches(file) &&
+                this.taildropReceive.state === 'awaiting_text_preview' ?
+                $r('app.string.transfer_collapse_action') :
+                $r('app.string.transfer_preview_action'))
+              .onClick(() => {
+                if (this.taildropReceiveMatches(file) &&
+                  this.taildropReceive.state === 'awaiting_text_preview') {
+                  this.collapseTaildropTextPreview();
+                } else {
+                  this.startTaildropTextPreview(file);
+                }
+              })
+          }
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            SymbolGlyph(this.taildropContentKind(file) === 'text' ?
+              $r('sys.symbol.text_clipboard') : $r('sys.symbol.save'))
+              .fontSize(18)
+              .fontColor([$r('sys.color.icon_primary')])
+          }
+            .width(32)
+            .height(32)
+            .padding(0)
+            .backgroundColor(Color.Transparent)
+            .accessibilityText(this.taildropReceiveMatches(file) &&
+              this.taildropReceive.state === 'awaiting_text_preview' ?
+              $r('app.string.transfer_copy_text_action') :
+              (this.taildropContentKind(file) === 'text' ?
+                $r('app.string.transfer_copy_text_action') :
+                $r('app.string.transfer_save_action')))
+            .onClick(() => {
+              if (this.taildropReceiveMatches(file) &&
+                this.taildropReceive.state === 'awaiting_text_preview') {
+                this.copyTaildropTextPreview();
+                return;
+              }
+              if (this.taildropSendActive() || this.taildropReceiveInProgress) {
+                this.showToast($r('app.string.transfer_busy_message'));
+                return;
+              }
+              if (this.taildropContentKind(file) === 'text') {
+                const cachedText: TaildropCachedFile | undefined =
+                  this.findTaildropCachedFile(file);
+                if (cachedText !== undefined) {
+                  this.showCachedTaildropTextPreview(cachedText);
+                  this.copyTaildropTextPreview();
+                  return;
+                }
+              } else {
+                const cachedFile: TaildropCachedFile | undefined =
+                  this.findTaildropCachedFile(file);
+                if (cachedFile !== undefined) {
+                  this.startPreparedTaildropFileSave(file);
+                  return;
+                }
+              }
+              if (this.taildropState !== 'ready') {
+                this.showToast($r('app.string.transfer_connect_first_title'));
+                return;
+              }
+              this.startTaildropReceive(file);
+            })
+          Button({ type: ButtonType.Circle, stateEffect: true }) {
+            SymbolGlyph($r('sys.symbol.trash'))
+              .fontSize(18)
+              .fontColor([$r('app.color.status_error')])
+          }
+            .width(32)
+            .height(32)
+            .padding(0)
+            .backgroundColor(Color.Transparent)
+            .accessibilityText($r('app.string.transfer_discard_action'))
+            .onClick(() => {
+              this.confirmDiscardTaildropFile(file);
+            })
+        }
       }
     }
     .width('100%')
     .constraintSize({ minHeight: 54 })
     .padding({ left: 12, right: 12 })
-    .opacity(this.taildropSendActive() ? 0.62 : 1)
+    .opacity(this.taildropSendActive() && !this.taildropReceiveMatches(file) ? 0.62 : 1)
   }
 
   @Builder
@@ -6532,6 +8267,11 @@ export struct BridgeStatus {
             .margin({ left: 54 })
         }
         this.TaildropWaitingFileRow(file)
+        if (this.taildropReceiveMatches(file) &&
+          this.taildropReceive.state === 'awaiting_text_preview' &&
+          this.taildropReceivedText.length > 0) {
+          this.TaildropInlineTextPreview()
+        }
       }, (file: TaildropWaitingFileSummary) => JSON.stringify(file))
     }
     .width('100%')
@@ -6541,12 +8281,98 @@ export struct BridgeStatus {
   }
 
   @Builder
+  private TaildropHistoryThumbnail(record: TaildropTransferRecord) {
+    Stack({ alignContent: Alignment.Center }) {
+      if (this.taildropHistoryPreviewUri(record).length > 0) {
+        Image(this.taildropHistoryPreviewUri(record))
+          .width(40)
+          .height(40)
+          .borderRadius(10)
+          .objectFit(ImageFit.Cover)
+      } else {
+        SymbolGlyph(this.taildropFileSymbol(record.fileName))
+          .fontSize(28)
+          .fontColor([record.state === 'completed' ? $r('sys.color.icon_emphasize') :
+            $r('sys.color.icon_secondary')])
+      }
+    }
+    .width(44)
+    .height(44)
+  }
+
+  private readTaildropTextPreview(result: TaildropReceiveResult): string | undefined {
+    if (result.size > TAILDROP_TEXT_CLIPBOARD_MAX_BYTES || result.path.length === 0) {
+      return undefined;
+    }
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(result.path);
+      if (!stat.isFile() || stat.size !== result.size) {
+        return undefined;
+      }
+      return fileIo.readTextSync(result.path);
+    } catch (_error) {
+      return undefined;
+    }
+  }
+
+  private collapseTaildropTextPreview(): void {
+    if (this.taildropReceive.state !== 'awaiting_text_preview') {
+      return;
+    }
+    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseInOut }, () => {
+      this.resetTaildropReceiveOperation();
+    });
+  }
+
+  private copyTaildropTextPreview(): void {
+    if (this.taildropReceive.state !== 'awaiting_text_preview' ||
+      this.taildropReceivedText.length === 0) {
+      return;
+    }
+    const staged: TaildropReceiveResult = this.taildropReceive;
+    this.getUIContext().animateTo({ duration: 180, curve: Curve.EaseIn }, () => {
+      this.taildropReceive = {
+        requestId: staged.requestId, action: 'stage', state: 'copying_text', reason: '',
+        name: staged.name, size: staged.size, path: staged.path
+      };
+    });
+    this.taildropReceiveStateStartedAtMs = Date.now();
+    this.taildropTextPreviewVisible = false;
+    const data: pasteboard.PasteData = pasteboard.createData(
+      pasteboard.MIMETYPE_TEXT_PLAIN, this.taildropReceivedText);
+    pasteboard.getSystemPasteboard().setData(data).then(() => {
+      if (!this.isCurrentTaildropReceive(staged.requestId, 'stage', 'copying_text')) {
+        return;
+      }
+      if (this.taildropState === 'ready') {
+        this.requestTaildropReceiveDelete(staged.requestId, staged.name, staged.size);
+      } else {
+        this.completeTaildropReceive();
+      }
+    }).catch(() => {
+      if (!this.isCurrentTaildropReceive(staged.requestId, 'stage', 'copying_text')) {
+        return;
+      }
+      this.taildropReceive = {
+        requestId: staged.requestId, action: 'stage', state: 'awaiting_text_preview', reason: '',
+        name: staged.name, size: staged.size, path: staged.path
+      };
+      this.taildropReceiveStateStartedAtMs = 0;
+      this.taildropTextPreviewVisible = true;
+      this.showToast($r('app.string.transfer_text_copy_failed'));
+    });
+  }
+
+  @Builder
   private TaildropHistoryRow(record: TaildropTransferRecord) {
     Row({ space: 12 }) {
-      SymbolGlyph($r('sys.symbol.doc'))
-        .fontSize(21)
-        .fontColor([record.state === 'completed' ? $r('sys.color.icon_emphasize') :
-          $r('sys.color.icon_secondary')])
+      Stack() {
+        this.TaildropHistoryThumbnail(record)
+      }
+      .width(44)
+      .height(44)
+      .borderRadius(10)
+      .clip(true)
       Column({ space: 2 }) {
         Text(this.taildropTransferRecordTitle(record))
           .fontSize(14)
@@ -6622,15 +8448,67 @@ export struct BridgeStatus {
   }
 
   @Builder
+  private TaildropInlineTextPreview() {
+    Column() {
+      Scroll() {
+        Text(this.taildropReceivedText)
+          .fontSize(14)
+          .fontColor($r('sys.color.font_primary'))
+          .lineHeight(21)
+          .width('100%')
+      }
+      .width('100%')
+      .constraintSize({ maxHeight: 220 })
+      .padding(12)
+      .backgroundColor(this.secondaryBackground())
+      .borderRadius(12)
+    }
+    .width('100%')
+    .padding({ left: 56, right: 12, bottom: 12 })
+    .transition(
+      TransitionEffect.asymmetric(
+        TransitionEffect.OPACITY.animation({ duration: 220, curve: Curve.EaseOut })
+          .combine(TransitionEffect.translate({ y: -6 })),
+        TransitionEffect.OPACITY.animation({ duration: 160, curve: Curve.EaseIn })
+          .combine(TransitionEffect.translate({ y: -4 }))
+      )
+    )
+  }
+
+  @Builder
+  private TaildropConnectionNotice() {
+    Column({ space: 4 }) {
+      Text($r('app.string.transfer_connect_first_title'))
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('sys.color.font_primary'))
+        .width('100%')
+      Text($r('app.string.transfer_connect_first_description'))
+        .fontSize(12)
+        .fontColor($r('sys.color.font_secondary'))
+        .lineHeight(18)
+        .width('100%')
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor(this.groupBackground())
+    .border({
+      width: 1,
+      color: $r('sys.color.comp_divider')
+    })
+    .borderRadius(16)
+  }
+
+  @Builder
   private TransferContent() {
     Scroll(this.transferScroller) {
       Column({ space: 14 }) {
+        if (!this.isConnected()) {
+          this.TaildropConnectionNotice()
+        }
         if (this.taildropPreparing || this.taildropTransfer.state === 'queued' ||
           this.taildropTransfer.state === 'sending') {
           this.TaildropActiveSendPanel()
-        }
-        if (this.taildropReceiveInProgress) {
-          this.TaildropActiveReceivePanel()
         }
         Column({ space: 8 }) {
           Column({ space: 2 }) {
@@ -6654,41 +8532,41 @@ export struct BridgeStatus {
           }
         }
         .width('100%')
-        .enabled(this.isConnected() && this.taildropState === 'ready')
-        .opacity(this.isConnected() && this.taildropState === 'ready' ? 1 : 0.45)
-        if (this.isConnected() && this.taildropState === 'ready') {
-          Column({ space: 8 }) {
-            Row() {
-              Text($r('app.string.transfer_inbox_title'))
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('sys.color.font_primary'))
-              Blank()
-              Text($r('app.string.transfer_clear_cache_action'))
-                .fontSize(12)
-                .fontColor($r('sys.color.icon_emphasize'))
-                .opacity(this.taildropSendActive() ? 0.45 : 1)
-                .onClick(() => this.confirmClearTaildropInboxCache())
-            }
-            .width('100%')
-            .padding({ left: 4, right: 4, top: 8, bottom: 2 })
-            .alignItems(VerticalAlign.Center)
-            if (this.taildropWaitingFiles.length > 0) {
-              this.TaildropInboxPanel()
-            } else {
-              Text(this.taildropInboxReason.length > 0 ?
-                $r('app.string.transfer_inbox_unavailable') : $r('app.string.transfer_inbox_empty'))
-                .fontSize(12)
-                .fontColor($r('sys.color.font_secondary'))
-                .textAlign(TextAlign.Center)
-                .width('100%')
-                .padding({ left: 20, right: 20, top: 18, bottom: 18 })
-                .backgroundColor(this.groupBackground())
-                .borderRadius(16)
-            }
+        Column({ space: 8 }) {
+          Row() {
+            Text($r('app.string.transfer_inbox_title'))
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('sys.color.font_primary'))
+            Blank()
+            Text($r('app.string.transfer_clear_cache_action'))
+              .fontSize(12)
+              .fontColor($r('sys.color.icon_emphasize'))
+              .opacity(!this.taildropSendActive() && !this.taildropReceiveInProgress ? 1 : 0.42)
+              .onClick(() => {
+                if (!this.taildropSendActive() && !this.taildropReceiveInProgress) {
+                  this.confirmClearTaildropInboxCache();
+                }
+              })
           }
           .width('100%')
+          .padding({ left: 4, right: 4, top: 8, bottom: 2 })
+          .alignItems(VerticalAlign.Center)
+          if (this.taildropWaitingFiles.length > 0) {
+            this.TaildropInboxPanel()
+          } else {
+            Text(this.taildropInboxReason.length > 0 ?
+              $r('app.string.transfer_inbox_unavailable') : $r('app.string.transfer_inbox_empty'))
+              .fontSize(12)
+              .fontColor($r('sys.color.font_secondary'))
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .padding({ left: 20, right: 20, top: 18, bottom: 18 })
+              .backgroundColor(this.groupBackground())
+              .borderRadius(16)
         }
+        }
+        .width('100%')
         Column({ space: 8 }) {
           Row() {
             Text($r('app.string.transfer_history_title'))
@@ -6760,10 +8638,13 @@ export struct BridgeStatus {
             this.SettingsGroupHeader($r('app.string.settings_appearance_title'))
           }
           GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
-            this.GlowSettingsPanel()
+            this.AppearanceSettingsPanel()
           }
           GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
-            this.HomeLayoutSettingsPanel()
+            this.SettingsGroupHeader($r('app.string.settings_storage_title'))
+          }
+          GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
+            this.CacheSettingsPanel()
           }
           GridCol({ span: { xs: 2, sm: 4, md: 8, lg: 12 } }) {
             this.SettingsGroupHeader($r('app.string.about_title'))
@@ -7118,6 +8999,7 @@ export struct BridgeStatus {
     .divider({ mode: DividerMode.NONE })
     .onSelected((index: number) => {
       this.activeTab = index;
+      this.updateCacheSizePolling(index);
       // HdsTabs emits onSelected when the swipe transition starts and
       // onChange after it completes. Writing the controlled index here makes
       // the component jump straight to the destination and cancels the
@@ -7130,6 +9012,7 @@ export struct BridgeStatus {
     .onChange((index: number) => {
       this.currentTab = index;
       this.activeTab = index;
+      this.updateCacheSizePolling(index);
     })
     .width('100%')
     .height('100%')
@@ -7247,6 +9130,53 @@ export struct BridgeStatus {
     }
   }
 
+  private confirmSimulateAppCrash(): void {
+    this.getUIContext().showAlertDialog({
+      title: $r('app.string.diagnostic_simulate_crash_confirm_title'),
+      message: $r('app.string.diagnostic_simulate_crash_confirm_message'),
+      autoCancel: true,
+      primaryButton: {
+        value: $r('app.string.cancel_action'),
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: $r('app.string.diagnostic_simulate_crash_action'),
+        fontColor: $r('app.color.status_error'),
+        action: () => this.simulateAppCrash()
+      }
+    });
+  }
+
+  private async simulateAppCrash(): Promise<void> {
+    if (this.diagnosticActionInProgress) {
+      return;
+    }
+    this.diagnosticActionInProgress = true;
+    this.diagnosticActionStatus = '';
+    this.recordDiagnosticEvent('diagnostic_crash_simulation_requested', 'diagnostics');
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      await vpnExtension.stopVpnExtensionAbility(this.vpnWant());
+      this.stopConnectionPolling();
+      this.clearConnectionCompletionTimer();
+      const staleStatus: string =
+        'OK | state=Running | loginURLReady=false | tailscaleIPs=1 | tun=true | ' +
+        'tunRead=1 | tunWrite=1 | tunReadErrors=0 | tunWriteErrors=0 | ' +
+        `phase=diagnostic-crash-simulation | heartbeatMs=${Date.now()}`;
+      if (!this.writePrivateTextFile(`${context.filesDir}/vpn-probe-status.txt`, staleStatus)) {
+        throw new Error('could not stage stale VPN status');
+      }
+      this.recordDiagnosticEvent('diagnostic_crash_simulation_staged', 'abort');
+      setTimeout(() => appProcess.abort(), 120);
+    } catch (_error) {
+      this.diagnosticActionStatus = context.resourceManager.getStringSync(
+        $r('app.string.diagnostic_simulate_crash_failed').id);
+      this.recordDiagnosticEvent('diagnostic_crash_simulation_failed', 'diagnostics');
+      this.diagnosticActionInProgress = false;
+    }
+  }
+
   @Builder
   private WideTabs() {
     HdsTabs({
@@ -7307,6 +9237,7 @@ export struct BridgeStatus {
     .onChange((index: number) => {
       this.currentTab = index;
       this.activeTab = index;
+      this.updateCacheSizePolling(index);
     })
     .width('100%')
     .height('100%')
@@ -7325,15 +9256,6 @@ export struct BridgeStatus {
     .backgroundColor($r('sys.color.background_secondary'))
     .onAreaChange((_oldValue: Area, newValue: Area) => {
       this.layoutWidth = Number(newValue.width);
-    })
-    .bindSheet($$this.taildropTextEditorVisible, this.TaildropTextEditorSheet(), {
-      height: 310,
-      detents: [310],
-      preferType: SheetType.BOTTOM,
-      scrollSizeMode: ScrollSizeMode.CONTINUOUS,
-      dragBar: true,
-      showClose: true,
-      title: { title: $r('app.string.transfer_text_editor_title') }
     })
     .bindSheet($$this.connectionDetailsVisible, this.ConnectionDetailsContent(), {
       height: '68%',
