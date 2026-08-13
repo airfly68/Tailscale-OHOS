@@ -1,0 +1,44 @@
+{
+  "networkPreferenceFields": ["routeAll", "exitNodeAllowLANAccess"],
+  "networkPreferenceDefaults": {
+    "routeAll": true,
+    "exitNodeAllowLANAccess": false
+  },
+  "exitNodeFields": ["id", "name", "online", "selected"],
+  "settingKeys": ["routeAll", "exitNodeAllowLANAccess"],
+  "statusTokens": [
+    "OK | exit node disabled",
+    "OK | exit node selected",
+    "FAILED | exit node | invalid selection",
+    "OK | network setting updated",
+    "FAILED | network setting | unsupported key"
+  ],
+  "persistenceFiles": ["exit-node-choice", "network-preferences.json"],
+  "requiredGatewayMethods": [
+    "backendExitNodes",
+    "backendSetExitNodeAsync",
+    "backendNetworkSettings",
+    "backendSetNetworkSettingAsync"
+  ],
+  "requiredQueueMethods": ["enqueue", "beginNext", "finish", "isCurrent"],
+  "bridgeAssertions": [
+    "NetworkSettingsGateway",
+    "NetworkSettingsUpdateQueue",
+    "queueExitNodeUpdate",
+    "drainExitNodeUpdates",
+    "queueNetworkSettingUpdate",
+    "drainNetworkSettingUpdates",
+    "exitNodeUpdatePromise",
+    "routeAllUpdatePromise",
+    "exitNodeLanUpdatePromise",
+    "this.refreshNetworkSettings()",
+    "await routeAllUpdate",
+    "await exitNodeLanUpdate"
+  ],
+  "nonGoalTokens": [
+    "beginVpnConnection",
+    "openSecureLogin",
+    "stopVpnProbe",
+    "TAILDROP"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "encryptionArea": "EL2",
+  "filesDirPathFragment": "/data/app/el2/{appUserId}/base/io.github.tailscaleohos/haps/entry/files",
+  "readOnlyMigration": {
+    "adapter": "StoragePaths.vpnStatusPath",
+    "file": "vpn-probe-status.txt",
+    "caller": "VpnBackgroundTaskManager.hasLiveVpnStatus"
+  },
+  "requiredDataClasses": [
+    "权威 tsnet 状态",
+    "控制服务器",
+    "登录",
+    "偏好",
+    "日志",
+    "VPN IPC",
+    "Tailsend 待处理状态",
+    "历史",
+    "诊断",
+    "缓存和临时文件"
+  ],
+  "requiredInventoryTerms": [
+    "唯一所有者",
+    "删除权限",
+    "不迁移、复制、删除或重写",
+    "未来可能迁移的候选"
+  ]
+}

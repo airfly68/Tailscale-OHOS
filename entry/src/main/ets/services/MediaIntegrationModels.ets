@@ -1,5 +1,3 @@
-import { ConnectionPathType } from './StreamingModels';
-
 export type MediaServiceType = 'jellyfin' | 'emby' | 'plex' | 'webdav' | 'smb';
 export type MediaProbeState = 'unknown' | 'checking' | 'available' | 'unavailable' | 'timeout' | 'error';
 
@@ -20,11 +18,7 @@ export interface MediaProbeResult {
 
 export interface HosPlayerLaunchRequest {
   protocolVersion: number;
-  action: 'add' | 'open';
   type: MediaServiceType;
-  url: string;
+  endpoint: string;
   name: string;
-  network: 'tailnet';
-  route: ConnectionPathType;
-  source: 'mesharc';
 }

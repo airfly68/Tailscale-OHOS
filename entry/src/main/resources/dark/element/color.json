@@ -147,6 +147,10 @@
     {
       "name": "diagnostic_danger_surface",
       "value": "#3A2020"
+    },
+    {
+      "name": "emphasize",
+      "value": "#73a7f9"
     }
   ]
 }

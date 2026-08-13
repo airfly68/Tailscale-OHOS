@@ -209,7 +209,7 @@ diff --git a/tsnet/tsnet.go b/tsnet/tsnet.go
 index 65367f2..a9815de 100644
 --- a/tsnet/tsnet.go
 +++ b/tsnet/tsnet.go
-@@ -26,6 +26,7 @@
+@@ -26,9 +26,11 @@
  	"sync"
  	"time"
  
@@ -217,7 +217,11 @@ index 65367f2..a9815de 100644
  	"tailscale.com/client/local"
  	"tailscale.com/client/tailscale"
  	"tailscale.com/control/controlclient"
-@@ -46,6 +47,7 @@
++	"tailscale.com/drive/driveimpl"
+ 	"tailscale.com/envknob"
+ 	"tailscale.com/health"
+ 	"tailscale.com/hostinfo"
+@@ -46,6 +48,7 @@
  	"tailscale.com/net/netmon"
  	"tailscale.com/net/proxymux"
  	"tailscale.com/net/socks5"
@@ -225,7 +229,7 @@ index 65367f2..a9815de 100644
  	"tailscale.com/net/tsdial"
  	"tailscale.com/tsd"
  	"tailscale.com/types/bools"
-@@ -64,6 +66,20 @@
+@@ -64,6 +67,25 @@
  //
  // Its exported fields may be changed until the first method call.
  type Server struct {
@@ -243,20 +247,102 @@ index 65367f2..a9815de 100644
 +	// physical system network.
 +	UseNetstackForPeerDial bool
 +
++	// taildriveFS is the in-process WebDAV filesystem exposed to clients of
++	// this tsnet server. It is created during start so LocalBackend can attach
++	// its peer remotes through tsd.System.
++	taildriveFS *driveimpl.FileSystemForLocal
++
  	// Dir specifies the name of the directory to use for
  	// state. If empty, a directory is selected automatically
  	// under os.UserConfigDir (https://golang.org/pkg/os/#UserConfigDir).
-@@ -570,7 +586,9 @@ func (s *Server) start() (reterr error) {
+@@ -219,8 +241,47 @@ func (s *Server) HTTPClient() *http.Client {
+ 	return &http.Client{
+ 		Transport: &http.Transport{
+ 			DialContext: s.Dial,
+ 		},
+ 	}
+ }
+ 
++// TaildriveHTTPClient returns an HTTP client whose only destination is the
++// local Taildrive WebDAV endpoint. Connections are handed directly to the
++// in-process Taildrive filesystem instead of entering the HarmonyOS system
++// network or VPN route.
++func (s *Server) TaildriveHTTPClient() (*http.Client, error) {
++	if err := s.Start(); err != nil {
++		return nil, err
++	}
++	if s.taildriveFS == nil {
++		return nil, errors.New("tsnet: Taildrive filesystem unavailable")
++	}
++	fs := s.taildriveFS
++
++	transport := &http.Transport{
++		Proxy:               nil,
++		ForceAttemptHTTP2:   false,
++		MaxIdleConns:        4,
++		MaxIdleConnsPerHost: 4,
++		IdleConnTimeout:     60 * time.Second,
++		DialContext: func(_ context.Context, network, address string) (net.Conn, error) {
++			if network != "tcp" && network != "tcp4" && network != "tcp6" {
++				return nil, fmt.Errorf("tsnet: Taildrive unexpected network %q", network)
++			}
++			if address != "100.100.100.100:8080" {
++				return nil, fmt.Errorf("tsnet: Taildrive unexpected destination %q", address)
++			}
++
++			clientConn, serverConn := net.Pipe()
++			remoteAddr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
++			go func() {
++				if err := fs.HandleConn(serverConn, remoteAddr); err != nil {
++					_ = serverConn.Close()
++				}
++			}()
++			return clientConn, nil
++		},
++	}
++	return &http.Client{Transport: transport}, nil
++}
+ 
+@@ -427,7 +488,11 @@ func (s *Server) Close() error {
+ 	if s.localAPIListener != nil {
+ 		s.localAPIListener.Close()
+ 	}
++	if s.taildriveFS != nil {
++		_ = s.taildriveFS.Close()
++		s.taildriveFS = nil
++	}
+ 	if s.loopbackListener != nil {
+ 		s.loopbackListener.Close()
+ 	}
+ 
+@@ -570,7 +635,11 @@ func (s *Server) start() (reterr error) {
  	closePool.add(s.netMon)
  
  	s.dialer = &tsdial.Dialer{Logf: tsLogf} // mutated below (before used)
 +	externalTun := s.Tun != nil
++	s.taildriveFS = driveimpl.NewFileSystemForLocal(tsLogf)
++	closePool.add(s.taildriveFS)
  	eng, err := wgengine.NewUserspaceEngine(tsLogf, wgengine.Config{
 +		Tun:           s.Tun,
  		EventBus:      sys.Bus.Get(),
  		ListenPort:    s.Port,
  		NetMon:        s.netMon,
-@@ -594,14 +612,20 @@ func (s *Server) start() (reterr error) {
+@@ -579,7 +648,8 @@ func (s *Server) start() (reterr error) {
+ 	ControlKnobs:  sys.ControlKnobs(),
+ 	HealthTracker: sys.HealthTracker(),
+ 	Metrics:       sys.UserMetricsRegistry(),
++	DriveForLocal: s.taildriveFS,
+ 	})
+ 	if err != nil {
+ 	return err
+ 	}
+@@ -587,5 +657,4 @@ func (s *Server) start() (reterr error) {
+ 	sys.Set(eng)
+ 	sys.HealthTracker().SetMetricsRegistry(sys.UserMetricsRegistry())
+ 
+-	// TODO(oxtoacart): do we need to support Taildrive on tsnet, and if so, how?
+ 	ns, err := netstack.Create(tsLogf, sys.Tun.Get(), eng, sys.MagicSock.Get(), s.dialer, sys.DNSManager.Get(), sys.ProxyMapper())
+@@ -594,14 +663,20 @@ func (s *Server) start() (reterr error) {
  	}
  	sys.Tun.Get().Start()
  	sys.Set(ns)
@@ -282,7 +368,7 @@ index 65367f2..a9815de 100644
  	}
  	s.dialer.NetstackDialTCP = func(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
  		// Note: don't just return ns.DialContextTCP or we'll return
-@@ -609,6 +633,9 @@ func (s *Server) start() (reterr error) {
+@@ -609,6 +684,9 @@ func (s *Server) start() (reterr error) {
  		// callers.
  		v4, v6 := s.TailscaleIPs()
  		src := bools.IfElse(dst.Addr().Is6(), v6, v4)

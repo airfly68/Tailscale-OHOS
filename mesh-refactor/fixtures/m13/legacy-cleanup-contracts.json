@@ -1,0 +1,88 @@
+{
+  "removedBridgeMembers": [
+    "refreshPeers",
+    "refreshAccount",
+    "settingsStatusText",
+    "routeSettingState",
+    "exitNodeLANSettingState",
+    "exitNodeSettingState",
+    "glowMaskColor",
+    "glowLevelDescription",
+    "sendFileToPeer",
+    "taildropReceiveActionText",
+    "isTaildropImageName",
+    "peerConnectivityKey",
+    "peerConnectivityInProgress",
+    "peerConnectivityResult",
+    "peerConnectivityRequestId",
+    "emptyPeerConnectivityResult",
+    "parsePeerConnectivityResult",
+    "finishPeerConnectivity",
+    "startPeerConnectivity",
+    "peerConnectivityReason",
+    "ConnectButtonContent",
+    "LoginButtonContent",
+    "ConnectButton",
+    "LoginButton",
+    "ImmersiveButton",
+    "ExitNodeChoiceButton",
+    "TransferOverviewPanel",
+    "TaildropTextPreviewSheet",
+    "TaildropActiveReceivePanel",
+    "taildropActiveReceiveText",
+    "taildropActiveReceivePreviewUri",
+    "handleTaildropMediaSaveClick",
+    "cancelTaildropMediaSave",
+    "cancelTaildropReceiveOperation"
+  ],
+  "removedServiceMembers": [
+    "probeConnectivity",
+    "enqueueConnectivity"
+  ],
+  "retainedCompatibilityFiles": [
+    "entry\\src\\main\\ets\\components\\BridgeStatus.ets",
+    "entry\\src\\main\\ets\\services\\StreamingModels.ets",
+    "entry\\src\\main\\ets\\components\\HomeLayoutPreferences.ets",
+    "entry\\src\\main\\ets\\components\\LegacyConnectedHomeHeader.ets"
+  ],
+  "retainedCompatibilityTokens": [
+    "M1 compatibility adapter",
+    "HomeLayoutPreferences",
+    "LegacyConnectedHomeHeader",
+    "AppShell",
+    "BridgeStatus",
+    "backendPeerConnectivityAsync"
+  ],
+  "requiredBridgeTokens": [
+    "export struct BridgeStatus",
+    "aboutToAppear(): void",
+    "aboutToDisappear(): void",
+    "onTaildropOpenInbox"
+  ],
+  "requiredWindowOwnerTokens": [
+    "on('windowSizeChange'",
+    "off('windowSizeChange'",
+    "on('avoidAreaChange'",
+    "off('avoidAreaChange'",
+    "on('densityUpdate'",
+    "off('densityUpdate'"
+  ],
+  "uniqueListenerEvents": [
+    "windowSizeChange",
+    "avoidAreaChange",
+    "densityUpdate"
+  ],
+  "forbiddenBridgeListenerTokens": [
+    "windowSizeChange",
+    "avoidAreaChange",
+    "densityUpdate"
+  ],
+  "documentationTokens": [
+    "M13",
+    "pre-cleanup",
+    "post-cleanup",
+    "BridgeStatus remains active",
+    "no user data",
+    "not executed"
+  ]
+}

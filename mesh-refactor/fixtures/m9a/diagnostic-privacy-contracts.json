@@ -1,0 +1,41 @@
+{
+  "sensitivePatterns": [
+    "access[_-]?token",
+    "auth(?:orization)?",
+    "password",
+    "secret",
+    "private[_-]?key",
+    "cookie",
+    "bearer",
+    "signature",
+    "https?:\\/\\/"
+  ],
+  "privacyFlags": [
+    "rawHiLogIncluded: false",
+    "rawBackendSnapshotIncluded: false",
+    "identityFieldsIncluded: false",
+    "networkAddressesIncluded: false"
+  ],
+  "capacityTokens": [
+    "MAX_EVENTS_PER_FILE",
+    "MAX_EVENT_FILE_BYTES",
+    "MAX_REPORT_JSON_BYTES",
+    "MAX_REPORT_SUMMARY_BYTES",
+    "retainWithinByteLimit",
+    "exceedsByteLimit"
+  ],
+  "errorCategories": [
+    "timeout",
+    "permission",
+    "unavailable",
+    "invalid_request",
+    "native_error"
+  ],
+  "nativeErrorPrefixes": [
+    "Go Bridge Failed",
+    "Tailscale Engine Failed",
+    "Control TLS Probe Failed",
+    "Tailscale Backend Failed",
+    "FAILED | secure browser handoff"
+  ]
+}

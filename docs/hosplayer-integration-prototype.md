@@ -1,57 +1,47 @@
-# MeshArc × HosPlayer 联动协议原型
+# MeshArc × HosPlayer 联动协议
 
 ## 当前状态
 
-MeshArc 已实现协议生成、参数安全校验和离线自检，但默认不会真正拉起 HosPlayer。
-原因是 HosPlayer 尚未公开稳定的 Deep Link 或 App Linking 接口。待双方确认正式
-URI 后，只需更新 `HosPlayerLauncher.ets` 中的协议地址并启用开关。
+HosPlayer 已提供服务器导入 Deep Link。MeshArc 在用户从设备卡片选择已识别的媒体服务后，生成导入链接并通过 `UIAbilityContext.openLink()` 拉起 HosPlayer。
 
-## URI 原型
+MeshArc 只交接媒体服务器的类型、地址和显示名称。用户名、密码、Access Token 以及其他登录凭据仍由 HosPlayer 自行获取和保存。
+
+## URI 约定
 
 ```text
-hosplayer://server/add
+hosplayer://server/import
   ?protocolVersion=1
   &type=jellyfin
-  &url=http%3A%2F%2F100.64.0.10%3A8096
+  &endpoint=http%3A%2F%2F100.64.0.10%3A8096
   &name=%E5%AE%B6%E5%BA%AD%20NAS
-  &network=tailnet
-  &route=direct
-  &source=mesharc
 ```
 
-字段约定：
-
-| 字段 | 值 |
+| 字段 | 约定 |
 | --- | --- |
-| `protocolVersion` | 当前为 `1` |
-| `action` | URI 路径中的 `add` 或 `open` |
-| `type` | `jellyfin`、`emby`、`plex`、`webdav`、`smb` |
-| `url` | 完整 HTTP/HTTPS 服务器地址 |
-| `name` | 用户可见的设备或服务器名称 |
-| `network` | 固定为 `tailnet` |
-| `route` | `direct`、`peerRelay`、`derp`、`unknown`、`unreachable` |
-| `source` | 固定为 `mesharc` |
+| `protocolVersion` | 当前固定为 `1` |
+| `type` | MeshArc 已识别的媒体服务类型，例如 `jellyfin`、`emby` 或 `plex` |
+| `endpoint` | 完整的 HTTP/HTTPS 服务器地址，使用 URL 编码 |
+| `name` | 用户可见的设备与服务器名称，使用 URL 编码 |
 
-URI 禁止携带用户名、密码、Access Token 和 URL fragment。MeshArc 只负责服务地址
-交接，登录与凭据保存仍由 HosPlayer 完成。
+URI 禁止携带用户名、密码、Access Token、URL fragment 或其他凭据。服务器地址必须使用 HTTP/HTTPS、长度不超过 2048 个字符，并且不能包含 userinfo。
 
-正式合作时建议改为 HosPlayer 自有域名下、经过系统验证的 HTTPS App Linking，
-MeshArc 继续通过 `UIAbilityContext.openLink()` 调用，不绑定 HosPlayer 的 Ability
-名称。
+调用端使用：
+
+```ets
+await context.openLink(uri, { appLinkingOnly: false });
+```
+
+`appLinkingOnly: false` 允许系统按 Deep Linking 规则解析 `hosplayer` 自定义 scheme，不绑定 HosPlayer 的 bundleName 或 Ability 名称。
 
 ## 服务探测
 
-探测只在用户点击设备卡片中的“检测影音服务”或刷新服务时执行，不做后台全网扫描。
-当前检查：
+探测只在用户点击设备卡片中的“检测影音服务”或刷新服务时执行，不做后台全网扫描。当前检查：
 
 - `8096/tcp`：`/System/Info/Public` 与 `/emby/System/Info/Public`
 - `8920/tcp`：相同的 HTTPS 端点，允许媒体服务器常见的自签名证书
 - `32400/tcp`：Plex `/identity`
 
-端口开放不会被视为发现成功。Jellyfin 和 Emby 必须返回包含明确 `ProductName`
-的公共系统信息；Plex 必须返回带 `machineIdentifier` 和 `version` 的
-`MediaContainer`。探测通过 Tailscale 内置 netstack 发起，结果会缓存，且每个设备
-只保留同类服务的一个首选地址。
+端口开放不会被视为发现成功。Jellyfin 和 Emby 必须返回包含明确 `ProductName` 的公共系统信息；Plex 必须返回带 `machineIdentifier` 和 `version` 的 `MediaContainer`。探测通过 Tailscale 内置 netstack 发起，结果会缓存，且每个设备只保留同类服务的一个首选地址。
 
 ## 无服务器验证
 
@@ -64,18 +54,17 @@ MeshArc 继续通过 `UIAbilityContext.openLink()` 调用，不绑定 HosPlayer 
    PASS · 媒体服务识别 4/4 · HosPlayer 参数协议通过
    ```
 
-5. 点击“复制 HosPlayer 参数原型”可检查完整 URI。
+5. 点击“复制 HosPlayer 导入链接”可检查完整 URI；其中应包含 `/server/import` 和 `endpoint=`，且不包含凭据。
 
 离线自检使用内置 Jellyfin、Emby、Plex 和非媒体 HTTP 响应样本，不访问网络。
 
 ## 日志
 
-诊断事件只记录动作、结果、服务类型和路径类型，不记录服务器地址、设备名称或凭据。
-主要事件包括：
+诊断事件只记录动作、结果、服务类型和路径类型，不记录服务器地址、设备名称或凭据。主要事件包括：
 
 - `media_probe_start` / `media_probe_success` / `media_probe_no_service`
 - `media_service_detected`
-- `hosplayer_contract_previewed` / `hosplayer_launch_*`
+- `hosplayer_launch_attempt` / `hosplayer_launch_success` / `hosplayer_launch_failed`
 - `media_self_test_started` / `media_self_test_passed` / `media_self_test_failed`
 
 VPN Extension 同时输出不含地址的 HiLog：

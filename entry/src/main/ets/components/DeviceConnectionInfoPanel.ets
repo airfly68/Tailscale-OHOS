@@ -1,11 +1,20 @@
 import { PeerPathResult, SunshineProbeResult } from '../services/StreamingModels';
 import { MediaProbeResult } from '../services/MediaIntegrationModels';
 
+interface LocalSendStatus {
+  state: string;
+  protocol?: string;
+  port?: number;
+  version?: string;
+  checkedAtMs?: number;
+}
+
 @Component
 export struct DeviceConnectionInfoPanel {
   @Prop path: PeerPathResult = { type: 'unknown', checkedAt: 0 };
   @Prop sunshine: SunshineProbeResult = { state: 'unknown', checkedAt: 0 };
   @Prop media: MediaProbeResult = { state: 'unknown', checkedAt: 0, services: [] };
+  @Prop localSend: LocalSendStatus = { state: 'unknown' };
   @Prop checking: boolean = false;
   @Prop refreshing: boolean = false;
   onRefresh: () => void = () => {};
@@ -54,6 +63,19 @@ export struct DeviceConnectionInfoPanel {
     return $r('app.string.device_status_unknown');
   }
 
+  private localSendLabel(): ResourceStr {
+    if (this.localSend.state === 'checking') return $r('app.string.localsend_checking');
+    if (this.localSend.state === 'available') return $r('app.string.localsend_available');
+    if (this.localSend.state === 'unavailable') return $r('app.string.localsend_unavailable');
+    if (this.localSend.state === 'offline') return $r('app.string.peer_offline');
+    return $r('app.string.device_status_unknown');
+  }
+
+  private localSendColor(): ResourceColor {
+    return this.localSend.state === 'available' ? $r('app.color.status_success') :
+      $r('sys.color.font_primary');
+  }
+
   build() {
     Column({ space: 0 }) {
       Row() {
@@ -96,6 +118,19 @@ export struct DeviceConnectionInfoPanel {
           .fontSize(12)
           .fontColor(this.sunshine.state === 'available' ? $r('app.color.status_streaming_available') :
             $r('sys.color.font_primary'))
+          .layoutWeight(1)
+          .textAlign(TextAlign.End)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 9, bottom: 10 })
+      Divider().color($r('app.color.divider_subtle'))
+      Row() {
+        Text($r('app.string.localsend_label')).fontSize(12).fontColor($r('sys.color.font_secondary'))
+        Text(this.localSendLabel())
+          .fontSize(12)
+          .fontColor(this.localSendColor())
           .layoutWeight(1)
           .textAlign(TextAlign.End)
           .maxLines(1)

@@ -1,0 +1,68 @@
+{
+  "accountFields": [
+    "displayName",
+    "loginName",
+    "profilePicURL",
+    "tailnetName",
+    "deviceName",
+    "addresses",
+    "needsApproval",
+    "keyExpired",
+    "keyExpiryUnixMs"
+  ],
+  "logoutTokens": [
+    "confirmLogout",
+    "logout",
+    "backendLogoutAsync",
+    "FAILED | logout | unavailable",
+    "logoutInProgress"
+  ],
+  "diagnosticInputFields": [
+    "appVersion",
+    "tailscaleVersion",
+    "nativeStatus",
+    "engineStatus",
+    "backendStatus",
+    "vpnStatus",
+    "peerCount",
+    "onlinePeerCount",
+    "exitNodeCount",
+    "exitNodeSelected",
+    "addressCount",
+    "signedIn",
+    "routeAll",
+    "exitNodeAllowLANAccess"
+  ],
+  "gatewayMethods": [
+    "readAccount",
+    "logout",
+    "inspectNativeBridge",
+    "probeEngine",
+    "probeControl",
+    "runMediaProbeSelfTest",
+    "recordEvent",
+    "generateReport",
+    "shareReport",
+    "clearWelcomeAcknowledgement",
+    "stageCrashProbeStatus",
+    "abortProcessAfter"
+  ],
+  "lifecycleTokens": [
+    "repeated entry",
+    "destroyed feature host",
+    "generation",
+    "cancellation",
+    "AccountDiagnosticsRequestGuard",
+    "isCurrent"
+  ],
+  "forbiddenBridgeTokens": [
+    "nativeBridge.backendLogoutAsync",
+    "nativeBridge.hello",
+    "nativeBridge.tailscaleVersion",
+    "nativeBridge.probeEngineAsync",
+    "nativeBridge.controlProbe",
+    "nativeBridge.mediaProbeSelfTestAsync",
+    "DiagnosticEventStore.",
+    "DiagnosticReportService."
+  ]
+}

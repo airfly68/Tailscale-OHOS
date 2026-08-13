@@ -1,0 +1,88 @@
+{
+  "scenarios": [
+    { "name": "phone-landscape", "width": 800, "height": 500, "equivalentInput": "window-size-change" },
+    { "name": "tablet-fullscreen", "width": 1200, "height": 1920, "equivalentInput": "window-size-change" },
+    { "name": "tablet-split-screen", "width": 840, "height": 1200, "equivalentInput": "window-size-change" },
+    { "name": "2in1-free-window", "width": 1024, "height": 700, "equivalentInput": "window-size-change" },
+    { "name": "fold-open-close-equivalent", "width": 839, "height": 840, "equivalentInput": "window-size-change" }
+  ],
+  "policyTokens": [
+    "ShellWindowPolicy",
+    "WindowShellResponsibility",
+    "shellWindowPolicy",
+    "edgeToEdge",
+    "systemBarsVisible",
+    "freeformTitleAreaVisible",
+    "contentSafeAreaOwner",
+    "titleAreaOwner",
+    "setWindowLayoutFullScreen",
+    "setWindowSystemBarEnable",
+    "setWindowSystemBarProperties",
+    "getWindowAvoidArea",
+    "on('avoidAreaChange'",
+    "avoidLayoutSafeArea: true",
+    "enableComponentSafeArea: true",
+    "shell-window-host",
+    "app-shell-edge-to-edge",
+    "shell-hds-navigation-safe-area",
+    "hds-navigation-home",
+    "hds-navigation-settings",
+    "hds-navigation-transfer"
+  ],
+  "continuityTokens": [
+    "onAreaChange",
+    "updateLayoutMetrics",
+    "lifecycleGeneration",
+    "currentTab",
+    "activeTab",
+    "selectedPeerKey",
+    "taildropTextInput",
+    "transferScroller",
+    "settingsScroller",
+    "homePeerScroller",
+    "currentOffset",
+    "scrollBy"
+  ],
+  "businessGuardTokens": [
+    "claimNotificationAction",
+    "claimRemoteDelete",
+    "taildropPickerOpen",
+    "taildropCancelPending",
+    "settingsRequestGuard",
+    "accountRequestGuard",
+    "diagnosticReportRequestGuard"
+  ],
+  "documentationTokens": [
+    "D013",
+    "D014",
+    "phone landscape",
+    "tablet fullscreen",
+    "tablet split-screen",
+    "2in1 free-window",
+    "foldable device not verified",
+    "window-size change",
+    "system title area",
+    "Sheet/Dialog",
+    "not restored",
+    "No protocol",
+    "no persistence format",
+    "no repeated business action",
+    "not executed"
+  ],
+  "forbiddenRuntimeTokens": [
+    "setWindowDecorVisible(false)",
+    "foldStatusChange",
+    "FOLLOW_DESKTOP"
+  ],
+  "resizeForbiddenWorkTokens": [
+    "showAlertDialog",
+    "openBindSheet",
+    "bindSheet",
+    "loadSettingsPreferences",
+    "saveSettingsPreferences",
+    "generateDiagnosticReport",
+    "clearAppCache",
+    "sendTaildrop",
+    "deleteRemote"
+  ]
+}

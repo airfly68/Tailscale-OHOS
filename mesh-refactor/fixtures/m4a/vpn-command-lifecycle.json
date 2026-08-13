@@ -1,0 +1,65 @@
+{
+  "states": [
+    "stopped",
+    "starting",
+    "needs_login",
+    "running",
+    "stopping",
+    "timed_out"
+  ],
+  "commands": ["connect", "login", "disconnect"],
+  "gatewayNativeMethods": [
+    "backendStart",
+    "backendStopAsync",
+    "backendStatus",
+    "backendVpnConfigAsync",
+    "backendAuthURLAsync"
+  ],
+  "gatewayVpnMethods": [
+    "startVpnExtensionAbility",
+    "stopVpnExtensionAbility"
+  ],
+  "commandFiles": [
+    "vpn-connect-config.json",
+    "vpn-stop-request.json",
+    "vpn-stop-response.json",
+    "vpn-backend-handoff-request.json",
+    "vpn-backend-handoff-response.json"
+  ],
+  "bridgeAssertions": [
+    "VpnCommandGateway",
+    "VpnCommandStateMachine",
+    "begin(VpnCoreCommand.CONNECT)",
+    "begin(VpnCoreCommand.LOGIN)",
+    "begin(VpnCoreCommand.DISCONNECT)",
+    "vpnCommandStateMachine.isActive",
+    "vpnCommandStateMachine.complete",
+    "vpnCommandStateMachine.timeout",
+    "invalidateLifecycle()"
+  ],
+  "legacyAdapters": [
+    "beginVpnConnection",
+    "openSecureLogin",
+    "stopVpnProbe",
+    "tryFastReconnect"
+  ],
+  "lifecycleAssertions": [
+    "APP_FOREGROUND_EVENT",
+    "aboutToAppear",
+    "aboutToDisappear",
+    "onForeground",
+    "onBackground",
+    "onDestroy",
+    "stopBackendStopWatcher",
+    "tab/page visibility"
+  ],
+  "nonGoalTokens": [
+    "backendLogoutAsync",
+    "taildrop"
+  ],
+  "forbiddenGatewayCommands": [
+    "backendSetExitNode",
+    "backendSetNetworkSetting",
+    "taildrop"
+  ]
+}

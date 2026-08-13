@@ -1,0 +1,7 @@
+{
+  "shellTokens": ["AppShell", "BridgeStatus", "@Entry"],
+  "trustBoundaryTokens": ["AppShellIntentAdapter", "toFeatureAction", "isValidNotificationAction", "taildropOpenInbox", "taildropNotificationAction", "taildropNotificationFileName", "taildropNotificationFileSize"],
+  "idempotencyTokens": ["deliveredNotificationKeys", "claimNotificationAction", "taildropNotificationActionInFlight", "repeated Want"],
+  "lifecycleTokens": ["stable feature host", "aboutToAppear", "aboutToDisappear", "APP_FOREGROUND_EVENT", "does not stop the core VPN", "appShellReady", "scheduleExternalTabNavigation", "appShellContentReady", "pendingAppShellFeatureActions"],
+  "externalContractTokens": ["protocolVersion", "streamProfile", "hosplayer://server", "unsafe_server_url"]
+}

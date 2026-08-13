@@ -1,3 +1,8 @@
+param(
+  [ValidateSet('default', 'release')]
+  [string]$Product = 'default'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $devecoHome = @(
@@ -19,6 +24,14 @@ $sdkHome = if ($env:DEVECO_SDK_HOME -and (Test-Path $env:DEVECO_SDK_HOME)) {
 
 if (-not (Test-Path $hvigor)) {
   throw "DevEco Hvigor was not found at $hvigor"
+}
+
+if ($Product -eq 'release') {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File (Join-Path $PSScriptRoot 'verify-release-changelog.ps1')
+  if ($LASTEXITCODE -ne 0) {
+    throw "Release changelog verification failed with exit code $LASTEXITCODE"
+  }
 }
 
 $toolingScope = Join-Path $PSScriptRoot '..\.tooling\node_modules\@ohos'
@@ -50,7 +63,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "OpenHarmony Go build failed with exit code $LASTEXITCODE"
 }
 
-& node $hvigor --mode module -p module=entry@default -p product=default assembleHap --no-daemon
+& node $hvigor --mode module -p module=entry@default -p product=$Product assembleHap --no-daemon
 if ($LASTEXITCODE -ne 0) {
   throw "Hvigor build failed with exit code $LASTEXITCODE"
 }

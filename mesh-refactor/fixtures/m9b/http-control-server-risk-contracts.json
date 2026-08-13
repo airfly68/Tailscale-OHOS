@@ -1,0 +1,36 @@
+{
+  "defaultHttps": "https://controlplane.tailscale.com",
+  "existingHttp": "http://headscale.example.test",
+  "newHttp": "http://headscale-new.example.test",
+  "newHttps": "https://headscale.example.test",
+  "persistedFields": ["controlURL", "confirmed", "updatedAtMs"],
+  "policyTokens": [
+    "requiresHttpControlServerRisk",
+    "candidate.startsWith('http://')",
+    "existing.controlURL !== candidate",
+    "!existing.confirmed"
+  ],
+  "riskDialogTokens": [
+    "control_server_http_risk_title",
+    "control_server_http_risk_message",
+    "control_server_http_risk_cancel",
+    "control_server_http_risk_confirm",
+    "control_server_http_risk_shown",
+    "control_server_http_risk_cancelled"
+  ],
+  "requiredSaveOrder": [
+    "confirmHttpControlServerRisk(normalized)",
+    "return;",
+    "persistControlServer(normalized)",
+    "if (settings === undefined)",
+    "this.vpnCommandGateway.stopBackend()",
+    "this.startBackend()"
+  ],
+  "nonGoalTokens": [
+    "DEFAULT_CONTROL_SERVER_URL",
+    "control-server.json",
+    "normalize(rawURL)",
+    "https://",
+    "http://"
+  ]
+}

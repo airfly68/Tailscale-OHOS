@@ -1,0 +1,59 @@
+{
+  "requiredGatewayReads": [
+    "backendSnapshot",
+    "backendPeers",
+    "backendAccount"
+  ],
+  "forbiddenGatewayCommands": [
+    "backendStart",
+    "backendStop",
+    "backendLogin",
+    "backendLogout",
+    "backendSetExitNode",
+    "backendSetNetworkSetting"
+  ],
+  "snapshotFieldMap": [
+    "status",
+    "exitNodes",
+    "peers",
+    "networkSettings",
+    "account"
+  ],
+  "peerFieldMap": [
+    "key",
+    "name",
+    "os",
+    "deviceModel",
+    "deviceType",
+    "addresses",
+    "online",
+    "exitNode",
+    "keyExpired",
+    "keyExpiryUnixMs"
+  ],
+  "accountFieldMap": [
+    "displayName",
+    "loginName",
+    "profilePicURL",
+    "tailnetName",
+    "deviceName",
+    "addresses",
+    "needsApproval",
+    "keyExpired",
+    "keyExpiryUnixMs"
+  ],
+  "trafficFieldMap": [
+    "trafficSession",
+    "txBytes",
+    "rxBytes"
+  ],
+  "lifecycleAssertions": [
+    "homeReadOnlyRequestGuard.invalidate()",
+    "homeReadOnlyRequestGuard.begin()",
+    "homeReadOnlyRequestGuard.isCurrent(homeReadGeneration)",
+    "context.eventHub.on(APP_FOREGROUND_EVENT, this.appForegroundListener)",
+    "context.eventHub.off(APP_FOREGROUND_EVENT, this.appForegroundListener)",
+    "this.startHealthPolling()",
+    "this.stopHealthPolling()"
+  ]
+}

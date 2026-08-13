@@ -1,0 +1,31 @@
+{
+  "controlServer": {
+    "fileName": "control-server.json",
+    "defaultURL": "https://controlplane.tailscale.com",
+    "fields": ["controlURL", "confirmed", "updatedAtMs"],
+    "missingAndLegacyCases": ["fileIo.accessSync", "parsed.confirmed", "normalize(parsed.controlURL)", "updatedAtMs"],
+    "confirmationFailures": ["disconnect", "invalid", "failed"],
+    "confirmationActions": ["normalizeControlServer", "confirmControlServer", "stopBackend", "startBackend"]
+  },
+  "layout": {
+    "storeName": "mesh_arc_home_layout",
+    "key": "connected_home_layout_mode",
+    "default": "compact",
+    "values": ["legacy", "compact"]
+  },
+  "gatewayMethods": [
+    "loadControlServer",
+    "normalizeControlServer",
+    "confirmControlServer",
+    "resetControlServer",
+    "loadConnectedHomeLayout",
+    "saveConnectedHomeLayout"
+  ],
+  "lifecycleTokens": [
+    "repeated entry",
+    "destroyed feature host",
+    "confirmation failure",
+    "SettingsRequestGuard",
+    "isCurrent"
+  ]
+}

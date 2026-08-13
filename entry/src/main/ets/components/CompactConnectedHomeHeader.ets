@@ -1,5 +1,6 @@
 @Component
 export struct CompactConnectedHomeHeader {
+  @Prop connected: boolean = false;
   @Prop statusTitle: ResourceStr = '';
   @Prop statusDescription: ResourceStr = '';
   @Prop statusColor: ResourceColor = $r('app.color.status_offline');
@@ -22,15 +23,15 @@ export struct CompactConnectedHomeHeader {
       Row({ space: 10 }) {
         Column({ space: 1 }) {
           Row({ space: 6 }) {
-            Text(this.statusTitle)
-              .fontSize(16)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('sys.color.font_primary'))
             Row()
               .width(8)
               .height(8)
               .borderRadius(4)
               .backgroundColor(this.statusColor)
+            Text(this.statusTitle)
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('sys.color.font_primary'))
           }
           .width('100%')
           .alignItems(VerticalAlign.Center)
@@ -69,10 +70,11 @@ export struct CompactConnectedHomeHeader {
           .width('100%')
           .padding({ left: 10, right: 10 })
         }
-        .width('100%')
-        .height(38)
-        .clip(true)
-        .borderRadius(10)
+      .width('100%')
+      .height(38)
+      .padding({ left: 10, right: 10 })
+      .backgroundColor($r('sys.color.comp_background_tertiary'))
+        .borderRadius(12)
         .onClick(this.onDetails)
       }
 

@@ -1,0 +1,21 @@
+{
+  "versionName": "0.9.10",
+  "versionCode": 99000002,
+  "changelogTokens": [
+    "0.8.41",
+    "0.9.10",
+    "VPN",
+    "Tailsend",
+    "出口节点",
+    "Sunshine/Moonlight",
+    "多设备界面",
+    "安全、隐私与诊断"
+  ],
+  "orderedSections": [
+    "## 主要更新",
+    "## 设备与首页体验",
+    "## 多设备界面",
+    "## 安全、隐私与诊断",
+    "## 其他改进"
+  ]
+}

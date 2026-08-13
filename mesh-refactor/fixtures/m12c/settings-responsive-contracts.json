@@ -1,0 +1,79 @@
+{
+  "adoptedWidthBreakpoints": [840],
+  "cases": [
+    { "name": "599vp compact", "width": 599, "height": 800, "content": "single-column" },
+    { "name": "600vp medium portrait", "width": 600, "height": 1000, "content": "single-column" },
+    { "name": "839vp boundary below", "width": 839, "height": 800, "content": "single-column" },
+    { "name": "840vp boundary", "width": 840, "height": 1200, "content": "two-column" },
+    { "name": "1439vp wide", "width": 1439, "height": 900, "content": "two-column" },
+    { "name": "1440vp extra wide", "width": 1440, "height": 900, "content": "two-column" }
+  ],
+  "transitions": [
+    { "name": "839 to 840", "from": 839, "to": 840, "layoutChanged": true },
+    { "name": "840 to 839", "from": 840, "to": 839, "layoutChanged": true },
+    { "name": "600 to 839", "from": 600, "to": 839, "layoutChanged": false },
+    { "name": "840 to 1440", "from": 840, "to": 1440, "layoutChanged": false }
+  ],
+  "requiredTokens": [
+    "SettingsContentLayout",
+    "settingsContentLayout",
+    "isSettingsTwoColumnLayout",
+    "SETTINGS_CONTENT_MAX_WIDTH",
+    "settingsScroller",
+    "settingsScrollAnchorY",
+    "settingsScrollRestoreTimer",
+    "currentOffset",
+    "scrollBy",
+    "settings-two-column",
+    "settings-single-column",
+    "settings-account-section",
+    "settings-diagnostics-section"
+  ],
+  "retainedStateTokens": [
+    "controlServerInput",
+    "controlServerEditorVisible",
+    "controlServerConfirmed",
+    "glowLevel",
+    "connectedHomeLayoutMode",
+    "cacheSizeBytes",
+    "cacheClearInProgress",
+    "diagnosticsUnlocked",
+    "diagnosticsExpanded",
+    "diagnosticReportStatus",
+    "diagnosticReportInProgress"
+  ],
+  "requestGuardTokens": [
+    "settingsRequestGuard",
+    "accountRequestGuard",
+    "diagnosticProbeRequestGuard",
+    "diagnosticReportRequestGuard",
+    "diagnosticMediaRequestGuard",
+    "diagnosticActionRequestGuard"
+  ],
+  "resizeForbiddenWorkTokens": [
+    "loadSettingsPreferences",
+    "saveSettingsPreferences",
+    "generateDiagnosticReport",
+    "showAlertDialog",
+    "openBindSheet",
+    "clearAppCache"
+  ],
+  "forbiddenStrategyTokens": [
+    "foldStatusChange",
+    "deviceTypes",
+    "tablet",
+    "2in1",
+    "1440vp",
+    "0.8",
+    "1.2"
+  ],
+  "documentationTokens": [
+    "D012",
+    "D014",
+    "840vp",
+    "Sheet/Dialog",
+    "not restored",
+    "no preference",
+    "not executed"
+  ]
+}

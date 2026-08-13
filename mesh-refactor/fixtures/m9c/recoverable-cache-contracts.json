@@ -1,0 +1,38 @@
+{
+  "canonicalRoot": "context.cacheDir",
+  "legacyRoot": "context.filesDir",
+  "migratedDirectory": "taildrop-outbox",
+  "preservedLegacyData": [
+    "tailscale",
+    "control-server.json",
+    "taildrop-inbox-export",
+    "taildrop-history.json",
+    "taildrop-send-request.json"
+  ],
+  "dualReadTokens": [
+    "taildropOutboxRoot",
+    "legacyTaildropOutboxRoot",
+    "isTaildropOutboxRoot",
+    "request.outboxRoot"
+  ],
+  "faultProtectionTokens": [
+    "accessSync(requestDir)",
+    "accessSync(destination)",
+    "copyFile",
+    "lstatSync(destination)",
+    "lstatSync(file.path)",
+    "cleanupRequestDirectory",
+    "writeAtomicTextFile",
+    "renameSync"
+  ],
+  "faultCases": [
+    "existing target",
+    "copy interruption",
+    "verification failure",
+    "atomic replacement failure",
+    "disk full",
+    "cache cleanup failure",
+    "system call failure"
+  ],
+  "secretStoreForbidden": ["AssetStore", "HUKS", "preferences", "fileIo", "class SecretStore"]
+}

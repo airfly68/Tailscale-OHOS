@@ -1,0 +1,26 @@
+{
+  "moduleName": "common",
+  "packageName": "@tailscale/common",
+  "reverseDependencyFixture": "mesh-refactor\\fixtures\\m1\\common-imports-entry.ets",
+  "peerPathSerialization": [
+    {
+      "name": "direct-with-optional-fields",
+      "value": {
+        "type": "direct",
+        "latencyMs": 12,
+        "relayRegion": "",
+        "checkedAt": 1722470400000
+      },
+      "serialized": "{\"type\":\"direct\",\"latencyMs\":12,\"relayRegion\":\"\",\"checkedAt\":1722470400000}"
+    },
+    {
+      "name": "unknown-with-error",
+      "value": {
+        "type": "unknown",
+        "checkedAt": 1722470400001,
+        "errorMessage": "probe unavailable"
+      },
+      "serialized": "{\"type\":\"unknown\",\"checkedAt\":1722470400001,\"errorMessage\":\"probe unavailable\"}"
+    }
+  ]
+}

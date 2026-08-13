@@ -3,14 +3,13 @@ import { HosPlayerLaunchRequest } from './MediaIntegrationModels';
 
 export interface HosPlayerContractConfig {
   baseUri: string;
-  enabled: boolean;
 }
 
-// Prototype contract for discussion with the HosPlayer author. Keep launch
-// disabled until the receiving application publishes and registers this URI.
+// HosPlayer's published import contract. Keep this URI independent from the
+// receiving application's bundle and ability names so the system resolver can
+// route it through Deep Linking.
 export const HOSPLAYER_CONTRACT: HosPlayerContractConfig = {
-  baseUri: 'hosplayer://server',
-  enabled: false
+  baseUri: 'hosplayer://server/import'
 };
 
 export class HosPlayerLauncher {
@@ -20,45 +19,31 @@ export class HosPlayerLauncher {
     this.context = context;
   }
 
-  isEnabled(): boolean {
-    return HOSPLAYER_CONTRACT.enabled;
-  }
-
   buildUri(request: HosPlayerLaunchRequest): string {
     this.validate(request);
     const fields: string[] = [
       `protocolVersion=${request.protocolVersion}`,
       `type=${encodeURIComponent(request.type)}`,
-      `url=${encodeURIComponent(request.url)}`,
-      `name=${encodeURIComponent(request.name)}`,
-      `network=${request.network}`,
-      `route=${encodeURIComponent(request.route)}`,
-      `source=${request.source}`
+      `endpoint=${encodeURIComponent(request.endpoint)}`,
+      `name=${encodeURIComponent(request.name)}`
     ];
-    return `${HOSPLAYER_CONTRACT.baseUri}/${request.action}?${fields.join('&')}`;
+    return `${HOSPLAYER_CONTRACT.baseUri}?${fields.join('&')}`;
   }
 
   async launch(request: HosPlayerLaunchRequest): Promise<void> {
-    if (!this.isEnabled()) {
-      throw new Error('hosplayer_contract_not_enabled');
-    }
     await this.context.openLink(this.buildUri(request), { appLinkingOnly: false });
   }
 
   runOfflineSelfTest(): string {
     const uri: string = this.buildUri({
       protocolVersion: 1,
-      action: 'add',
       type: 'jellyfin',
-      url: 'http://100.64.0.10:8096',
-      name: '家庭 NAS',
-      network: 'tailnet',
-      route: 'direct',
-      source: 'mesharc'
+      endpoint: 'http://100.64.0.10:8096',
+      name: '家庭 NAS'
     });
-    const passed: boolean = uri.startsWith('hosplayer://server/add?') &&
+    const passed: boolean = uri.startsWith('hosplayer://server/import?') &&
       uri.includes('type=jellyfin') &&
-      uri.includes('url=http%3A%2F%2F100.64.0.10%3A8096') &&
+      uri.includes('endpoint=http%3A%2F%2F100.64.0.10%3A8096') &&
       uri.includes('name=%E5%AE%B6%E5%BA%AD%20NAS') &&
       !uri.toLowerCase().includes('password') &&
       !uri.toLowerCase().includes('token');
@@ -66,10 +51,10 @@ export class HosPlayerLauncher {
   }
 
   private validate(request: HosPlayerLaunchRequest): void {
-    if (request.protocolVersion !== 1 || (request.action !== 'add' && request.action !== 'open')) {
-      throw new Error('invalid_contract_version_or_action');
+    if (request.protocolVersion !== 1) {
+      throw new Error('invalid_contract_version');
     }
-    const normalizedUrl: string = request.url.trim();
+    const normalizedUrl: string = request.endpoint.trim();
     if ((!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) ||
       /^https?:\/\/[^/]*@/i.test(normalizedUrl) || normalizedUrl.length > 2048 ||
       normalizedUrl.includes('#')) {

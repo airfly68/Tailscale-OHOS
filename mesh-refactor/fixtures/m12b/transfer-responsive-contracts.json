@@ -1,0 +1,58 @@
+{
+  "adoptedWidthBreakpoints": [840],
+  "cases": [
+    { "name": "medium-portrait-below-840", "width": 600, "height": 1000, "content": "single-column" },
+    { "name": "medium-landscape-below-840", "width": 839, "height": 599, "content": "single-column" },
+    { "name": "expanded-portrait-at-840", "width": 840, "height": 1200, "content": "split" },
+    { "name": "expanded-landscape-below-1440", "width": 1439, "height": 800, "content": "split" },
+    { "name": "candidate-xl-keeps-expanded", "width": 1440, "height": 900, "content": "split" }
+  ],
+  "transitions": [
+    { "name": "cross-into-split", "from": 839, "to": 840, "layoutChanged": true },
+    { "name": "cross-back-to-single", "from": 840, "to": 839, "layoutChanged": true },
+    { "name": "resize-within-single", "from": 600, "to": 839, "layoutChanged": false },
+    { "name": "resize-within-split", "from": 840, "to": 1440, "layoutChanged": false }
+  ],
+  "requiredTokens": [
+    "TransferContentLayout",
+    "transferContentLayout",
+    "isTransferSplitLayout",
+    "transferScrollAnchorY",
+    "currentOffset",
+    "scrollBy",
+    "transferScrollRestoreTimer",
+    "transfer-single-column",
+    "transfer-split-layout"
+  ],
+  "retainedStateTokens": [
+    "taildropTextInput",
+    "taildropReceive",
+    "taildropTransfer",
+    "taildropCancelPending",
+    "taildropPickerOpen",
+    "taildropPreparing"
+  ],
+  "idempotencyTokens": [
+    "claimNotificationAction",
+    "claimRemoteDelete",
+    "isCurrentTaildropReceive",
+    "taildropSendActive",
+    "taildropCancelPending"
+  ],
+  "forbiddenStrategyTokens": [
+    "foldStatusChange",
+    "deviceTypes",
+    "tablet",
+    "2in1",
+    "320vp",
+    "1440vp",
+    "0.8",
+    "1.2"
+  ],
+  "documentationTokens": [
+    "839→840→839",
+    "No protocol",
+    "No persistence",
+    "not executed"
+  ]
+}

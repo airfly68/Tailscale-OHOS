@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "napiGoAbi": {
+    "requiredArkTsMethods": ["backendStart", "backendStop", "backendStatus", "backendVpnConfig", "backendTaildropSendAsync", "backendTaildropReceiveAsync"],
+    "requiredGoExports": ["TSBackendStart", "TSBackendStop", "TSBackendStatus", "TSBackendVPNConfig", "TSBackendTaildropSend", "TSBackendTaildropReceive"]
+  },
+  "vpn": {
+    "requiredFiles": ["vpn-connect-config.json", "vpn-stop-request.json", "vpn-stop-response.json", "vpn-config-summary.txt"],
+    "states": ["stopped", "starting", "NeedsLogin", "Running", "failed", "disconnecting"],
+    "configFields": ["requestId", "status"]
+  },
+  "taildrop": {
+    "requiredFiles": ["taildrop-send-request.json", "taildrop-cancel-request.json", "taildrop-inbox-snapshot.json", "taildrop-receive-request.json", "taildrop-receive-response.json"],
+    "transferStates": ["queued", "sending", "completed", "failed", "cancelled"],
+    "unknownFieldCompatible": true,
+    "orderIndependent": true,
+    "nullAndMissingDistinct": true
+  },
+  "controlServer": {"file": "control-server.json", "fields": ["controlURL", "confirmed"], "defaultURL": "https://controlplane.tailscale.com"},
+  "notificationWant": ["taildropOpenInbox", "taildropNotificationAction", "taildropNotificationFileName", "taildropNotificationFileSize"],
+  "externalLaunch": {
+    "moonlight": ["bundleName", "moduleName", "abilityName", "protocolVersion", "action", "host", "streamProfile"],
+    "hosPlayer": ["hosplayer://server", "protocolVersion", "type", "url", "name", "network", "route", "source"],
+    "disabledUntilPublished": true
+  },
+  "jsonCompatibilityExamples": {
+    "missingOptional": {"state": "queued"},
+    "explicitNull": {"state": "queued", "reason": null},
+    "unknownField": {"state": "queued", "futureField": "ignored-by-older-readers"}
+  }
+}

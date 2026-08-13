@@ -37,7 +37,7 @@ export struct DeviceActionButtons {
 
   build() {
     Row({ space: 0 }) {
-      Row() {
+      Button({ type: ButtonType.Normal, stateEffect: true }) {
         Row({ space: 5 }) {
           if (this.launching || this.sunshineState === 'checking') {
             LoadingProgress().width(14).height(14).color($r('app.color.action_streaming_icon'))
@@ -73,7 +73,7 @@ export struct DeviceActionButtons {
         .height(24)
         .color($r('app.color.action_streaming_border'))
 
-      Row() {
+      Button({ type: ButtonType.Normal, stateEffect: true }) {
         Row({ space: 5 }) {
           if (this.mediaChecking || this.mediaLaunching) {
             LoadingProgress().width(14).height(14).color($r('app.color.action_media_progress'))
@@ -113,7 +113,7 @@ export struct DeviceActionButtons {
         .height(24)
         .color($r('app.color.action_media_border'))
 
-      Row() {
+      Button({ type: ButtonType.Normal, stateEffect: true }) {
         Row({ space: 5 }) {
           SymbolGlyph($r('sys.symbol.doc'))
             .fontSize(14)

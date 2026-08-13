@@ -1,0 +1,41 @@
+{
+  "listenerEvents": [
+    "windowSizeChange",
+    "avoidAreaChange",
+    "densityUpdate"
+  ],
+  "listenerCount": 3,
+  "requiredEntryHooks": [
+    "onWindowStageCreate",
+    "onWindowStageDestroy",
+    "onDestroy",
+    "onConfigurationUpdate",
+    "windowEnvironment.attach",
+    "windowEnvironment.detach",
+    "windowEnvironment.updateConfiguration"
+  ],
+  "observationTokens": [
+    "getWindowProperties",
+    "getWindowAvoidArea",
+    "getWindowDensityInfo",
+    "getObservation",
+    "generation",
+    "listenerCount"
+  ],
+  "callbackForbiddenTokens": [
+    "AppStorage",
+    "fetch(",
+    "http.",
+    "file.",
+    "fs.",
+    "Promise",
+    "setTimeout",
+    "Vpn",
+    "Taildrop"
+  ],
+  "deviceEvidence": [
+    "phone",
+    "tablet",
+    "2in1"
+  ]
+}

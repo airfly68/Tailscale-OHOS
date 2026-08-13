@@ -1,0 +1,52 @@
+{
+  "notificationIdentityTokens": [
+    "taildropNotificationEventId",
+    "taildropNotificationReceivedAtMs",
+    "UPDATE_PRESENT_FLAG",
+    "receivedAtMs: suppliedReceivedAtMs",
+    "candidate.receivedAtMs === request.receivedAtMs",
+    "releaseTaildropNotificationActionClaim",
+    "requiresSecureMediaSave",
+    "notification_taildrop_open_action"
+  ],
+  "secureMediaSaveTokens": [
+    "SaveButton",
+    "validateTaildropMediaSaveAuthorization",
+    "transfer_media_ready_to_save",
+    "showAssetsCreationDialog",
+    "PhotoCreationConfig"
+  ],
+  "forbiddenMediaPermissionTokens": [
+    "requestTaildropNotificationMediaPermission",
+    "taildropNotificationMediaSaveKey",
+    "ohos.permission.WRITE_IMAGEVIDEO",
+    "permission_write_media_reason",
+    "MediaAssetChangeRequest",
+    "applyChanges"
+  ],
+  "vpnLifecycleTokens": [
+    "stopInFlight",
+    "this.isBackground = false",
+    "this.startWhenVpnActive(context, this.lifecycleGeneration, 0)"
+  ],
+  "windowLifecycleTokens": [
+    "windowSizeListenerRegistered",
+    "avoidAreaListenerRegistered",
+    "densityListenerRegistered",
+    "listener registration unavailable",
+    "logListenerCleanupError"
+  ],
+  "controlProbeTokens": [
+    "p.result = \"\"",
+    "dialer.DialContext(ctx",
+    "HandshakeContext(ctx)"
+  ],
+  "forbiddenNotificationTokens": [
+    "WantAgentFlags.CONSTANT_FLAG",
+    "completionNotificationId(fileName"
+  ],
+  "forbiddenControlProbeTokens": [
+    "DialContext(context.Background()",
+    "tls.DialWithDialer"
+  ]
+}

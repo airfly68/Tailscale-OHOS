@@ -1,4 +1,4 @@
-import appProcess from '@ohos.process';
+import { process as appProcess } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import nativeBridge from 'libtailscale_ohos.so';

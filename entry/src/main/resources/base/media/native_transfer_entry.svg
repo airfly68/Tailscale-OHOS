@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <title>Mesh transfer settings</title>
+  <g fill="none" stroke="#21005D" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6">
+    <circle cx="24" cy="19" r="5.2"/>
+    <path d="M14.2 34.2c.6-5.1 4.6-8.7 9.8-8.7s9.2 3.6 9.8 8.7"/>
+    <path d="M8.4 28.8a17 17 0 0 1 0-19.2M39.6 28.8a17 17 0 0 0 0-19.2"/>
+    <path d="M13.9 24.4a11.2 11.2 0 0 1 0-10.4M34.1 24.4a11.2 11.2 0 0 0 0-10.4"/>
+  </g>
+</svg>

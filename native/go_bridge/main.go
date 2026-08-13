@@ -93,6 +93,11 @@ func TSBackendSnapshot() *C.char {
 	return C.CString(harmonyBackend.snapshot())
 }
 
+//export TSBackendLocalSendRefresh
+func TSBackendLocalSendRefresh() *C.char {
+	return C.CString(harmonyBackend.refreshMeshArcDevices())
+}
+
 //export TSBackendTaildropIncomingSnapshot
 func TSBackendTaildropIncomingSnapshot() *C.char {
 	return C.CString(harmonyBackend.taildropIncomingSnapshotJSON())
@@ -204,6 +209,57 @@ func TSBackendTaildropReceive(request *C.char) *C.char {
 		return C.CString(`{"state":"failed","reason":"invalid_request"}`)
 	}
 	return C.CString(harmonyBackend.taildropReceive(C.GoString(request)))
+}
+
+//export TSBackendTaildriveList
+func TSBackendTaildriveList(request *C.char) *C.char {
+	if request == nil {
+		return C.CString(`{"state":"failed","path":"/","entries":[],"reason":"invalid_request"}`)
+	}
+	return C.CString(harmonyBackend.taildriveList(C.GoString(request)))
+}
+
+//export TSBackendTaildriveStat
+func TSBackendTaildriveStat(request *C.char) *C.char {
+	if request == nil {
+		return C.CString(marshalTaildriveStat(taildriveStatResult{State: "failed", Reason: "invalid_request"}))
+	}
+	return C.CString(harmonyBackend.taildriveStat(C.GoString(request)))
+}
+
+//export TSBackendTaildriveMutate
+func TSBackendTaildriveMutate(request *C.char) *C.char {
+	if request == nil {
+		return C.CString(`{"state":"failed","reason":"invalid_request"}`)
+	}
+	return C.CString(harmonyBackend.taildriveMutate(C.GoString(request)))
+}
+
+//export TSBackendTaildriveDownload
+func TSBackendTaildriveDownload(request *C.char) *C.char {
+	if request == nil {
+		return C.CString(`{"state":"failed","reason":"invalid_request"}`)
+	}
+	return C.CString(harmonyBackend.taildriveDownload(C.GoString(request)))
+}
+
+//export TSBackendTaildriveUpload
+func TSBackendTaildriveUpload(request *C.char) *C.char {
+	if request == nil {
+		return C.CString(`{"state":"failed","reason":"invalid_request"}`)
+	}
+	return C.CString(harmonyBackend.taildriveUpload(C.GoString(request)))
+}
+
+//export TSBackendTaildriveTransferSnapshot
+func TSBackendTaildriveTransferSnapshot() *C.char {
+	return C.CString(marshalTaildriveTransfer(harmonyBackend.taildriveTransferSnapshot()))
+}
+
+//export TSBackendTaildriveCancel
+func TSBackendTaildriveCancel() *C.char {
+	harmonyBackend.cancelTaildriveTransfer("cancelled")
+	return C.CString(marshalTaildriveTransfer(harmonyBackend.taildriveTransferSnapshot()))
 }
 
 //export TSBackendRestartWithTun

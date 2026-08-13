@@ -1,0 +1,181 @@
+{
+  "source_directory": "C:\\Users\\JerryZ\\Documents\\TailscaleOHOS\\best-practices",
+  "file_count": 19,
+  "success_count": 19,
+  "failure_count": 0,
+  "total_extracted_text_bytes": 372246,
+  "documents": [
+    {
+      "file_name": "一次开发，多端部署概览-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：39：02 PM).html",
+      "size_bytes": 74495165,
+      "html_title": "一次开发，多端部署概览-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "背景",
+      "status": "success",
+      "unit_count": 79,
+      "text_bytes": 23039
+    },
+    {
+      "file_name": "从一个例子开始-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：39：26 PM).html",
+      "size_bytes": 19907764,
+      "html_title": "从一个例子开始-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "UX设计",
+      "status": "success",
+      "unit_count": 126,
+      "text_bytes": 13638
+    },
+    {
+      "file_name": "分层架构设计-应用架构 - 华为HarmonyOS开发者 (8_1_2026 12：37：08 PM).html",
+      "size_bytes": 3787758,
+      "html_title": "分层架构设计-应用架构 - 华为HarmonyOS开发者",
+      "main_heading": "逻辑模型",
+      "status": "success",
+      "unit_count": 16,
+      "text_bytes": 5216
+    },
+    {
+      "file_name": "响应式布局-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：42：07 PM).html",
+      "size_bytes": 34900611,
+      "html_title": "响应式布局-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 336,
+      "text_bytes": 49523
+    },
+    {
+      "file_name": "多设备体验设计-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：39：52 PM).html",
+      "size_bytes": 5678583,
+      "html_title": "多设备体验设计-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "多设备体验设计-一次开发，多端部署",
+      "status": "success",
+      "unit_count": 8,
+      "text_bytes": 1911
+    },
+    {
+      "file_name": "多设备功能开发-多设备功能开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：44：27 PM).html",
+      "size_bytes": 3389201,
+      "html_title": "多设备功能开发-多设备功能开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "系统能力",
+      "status": "success",
+      "unit_count": 34,
+      "text_bytes": 4266
+    },
+    {
+      "file_name": "多设备设置界面-多设备界面开发案例-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：44：15 PM).html",
+      "size_bytes": 13329268,
+      "html_title": "多设备设置界面-多设备界面开发案例-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 53,
+      "text_bytes": 8535
+    },
+    {
+      "file_name": "多设备适配屏幕差异-多设备功能开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：45：01 PM).html",
+      "size_bytes": 60778444,
+      "html_title": "多设备适配屏幕差异-多设备功能开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 83,
+      "text_bytes": 12141
+    },
+    {
+      "file_name": "屏幕类型布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：43：09 PM).html",
+      "size_bytes": 77373907,
+      "html_title": "屏幕类型布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 187,
+      "text_bytes": 38430
+    },
+    {
+      "file_name": "布局概述-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：41：50 PM).html",
+      "size_bytes": 3651532,
+      "html_title": "布局概述-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "布局概述-多设备界面开发-一次开发，多端部署",
+      "status": "success",
+      "unit_count": 17,
+      "text_bytes": 3991
+    },
+    {
+      "file_name": "应用数据安全-安全设计 - 华为HarmonyOS开发者 (8_1_2026 12：37：40 PM).html",
+      "size_bytes": 9929740,
+      "html_title": "应用数据安全-安全设计 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 142,
+      "text_bytes": 20293
+    },
+    {
+      "file_name": "架构概览-应用架构 - 华为HarmonyOS开发者 (8_1_2026 12：36：50 PM).html",
+      "size_bytes": 3264440,
+      "html_title": "架构概览-应用架构 - 华为HarmonyOS开发者",
+      "main_heading": "架构概览-应用架构",
+      "status": "success",
+      "unit_count": 7,
+      "text_bytes": 1190
+    },
+    {
+      "file_name": "模块化设计-应用架构 - 华为HarmonyOS开发者 (8_1_2026 12：37：18 PM).html",
+      "size_bytes": 4703283,
+      "html_title": "模块化设计-应用架构 - 华为HarmonyOS开发者",
+      "main_heading": "模块化设计理念",
+      "status": "success",
+      "unit_count": 94,
+      "text_bytes": 17738
+    },
+    {
+      "file_name": "深色模式适配-主题与样式 - 华为HarmonyOS开发者 (8_1_2026 12：38：41 PM).html",
+      "size_bytes": 23735213,
+      "html_title": "深色模式适配-主题与样式 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 99,
+      "text_bytes": 14535
+    },
+    {
+      "file_name": "窗口方向-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：40：41 PM).html",
+      "size_bytes": 327063559,
+      "html_title": "窗口方向-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 336,
+      "text_bytes": 60217
+    },
+    {
+      "file_name": "窗口模式-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：40：14 PM).html",
+      "size_bytes": 178858647,
+      "html_title": "窗口模式-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 296,
+      "text_bytes": 48600
+    },
+    {
+      "file_name": "窗口沉浸式-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：41：36 PM).html",
+      "size_bytes": 18809031,
+      "html_title": "窗口沉浸式-多设备窗口形态-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 86,
+      "text_bytes": 17820
+    },
+    {
+      "file_name": "组件布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：42：59 PM).html",
+      "size_bytes": 35228691,
+      "html_title": "组件布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "概述",
+      "status": "success",
+      "unit_count": 61,
+      "text_bytes": 6223
+    },
+    {
+      "file_name": "页面布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者 (8_1_2026 12：42：45 PM).html",
+      "size_bytes": 66059357,
+      "html_title": "页面布局场景-界面布局响应式变化-多设备界面开发-一次开发，多端部署 - 华为HarmonyOS开发者",
+      "main_heading": "重复布局",
+      "status": "success",
+      "unit_count": 214,
+      "text_bytes": 24940
+    }
+  ],
+  "failures": []
+}

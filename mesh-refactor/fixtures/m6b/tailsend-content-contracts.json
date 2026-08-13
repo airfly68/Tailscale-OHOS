@@ -1,0 +1,5 @@
+{
+  "gatewayMethods": ["beginRecovery", "isCurrentRecovery", "parseSnapshot", "loadHistory", "previewUri", "restoreCachedFiles"],
+  "acceptanceTokens": ["Cache missing", "cache corrupted", "process restart", "Application upgrade", "Preview failure", "History missing", "recovery re-entry"],
+  "nonGoalTokens": ["createStageRequest", "createDeleteRequest", "claimRemoteDelete", "taildrop-send-request.json", "taildrop-receive-request.json"]
+}

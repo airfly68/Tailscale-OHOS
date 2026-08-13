@@ -35,6 +35,8 @@ const SUNSHINE_PROBE_REQUEST_FILE_NAME: string = 'sunshine-probe-request.json';
 const SUNSHINE_PROBE_RESPONSE_FILE_NAME: string = 'sunshine-probe-response.json';
 const MEDIA_SERVICE_PROBE_REQUEST_FILE_NAME: string = 'media-service-probe-request.json';
 const MEDIA_SERVICE_PROBE_RESPONSE_FILE_NAME: string = 'media-service-probe-response.json';
+const LOCAL_SEND_REFRESH_REQUEST_FILE_NAME: string = 'localsend-refresh-request.json';
+const LOCAL_SEND_REFRESH_RESPONSE_FILE_NAME: string = 'localsend-refresh-response.json';
 const TAILDROP_SEND_REQUEST_FILE_NAME: string = 'taildrop-send-request.json';
 const TAILDROP_TARGETS_FILE_NAME: string = 'taildrop-targets.json';
 const TAILDROP_CANCEL_REQUEST_FILE_NAME: string = 'taildrop-cancel-request.json';
@@ -42,6 +44,12 @@ const TAILDROP_INBOX_DIR_NAME: string = 'taildrop-inbox-export';
 const TAILDROP_INBOX_SNAPSHOT_FILE_NAME: string = 'taildrop-inbox-snapshot.json';
 const TAILDROP_RECEIVE_REQUEST_FILE_NAME: string = 'taildrop-receive-request.json';
 const TAILDROP_RECEIVE_RESPONSE_FILE_NAME: string = 'taildrop-receive-response.json';
+const TAILDRIVE_QUERY_REQUEST_FILE_NAME: string = 'taildrive-query-request.json';
+const TAILDRIVE_QUERY_RESPONSE_FILE_NAME: string = 'taildrive-query-response.json';
+const TAILDRIVE_TRANSFER_REQUEST_FILE_NAME: string = 'taildrive-transfer-request.json';
+const TAILDRIVE_TRANSFER_RESPONSE_FILE_NAME: string = 'taildrive-transfer-response.json';
+const TAILDRIVE_CONTROL_REQUEST_FILE_NAME: string = 'taildrive-control-request.json';
+const TAILDRIVE_CONTROL_RESPONSE_FILE_NAME: string = 'taildrive-control-response.json';
 const TAILDROP_CACHE_RETENTION_MS: number = 7 * 24 * 60 * 60 * 1000;
 const VPN_PEERS_FILE_NAME: string = 'vpn-peers.json';
 const VPN_STOP_REQUEST_FILE_NAME: string = 'vpn-stop-request.json';
@@ -65,11 +73,36 @@ interface PeerSummary {
   exitNode: boolean;
   keyExpired: boolean;
   keyExpiryUnixMs: number;
+  localSend?: LocalSendStatus;
+}
+
+interface LocalSendStatus {
+  state: string;
+  protocol?: string;
+  port?: number;
+  version?: string;
+  checkedAtMs?: number;
 }
 
 interface PersistedPeerSnapshot {
   peers: PeerSummary[];
+  meshArcReceiver: MeshArcReceiverStatus;
   updatedAtMs: number;
+}
+
+interface MeshArcReceiverStatus {
+  state: string;
+  protocol?: string;
+  httpStatus?: number;
+  sent: number;
+  registered: number;
+  httpsReason?: string;
+  httpReason?: string;
+  checkedAtMs?: number;
+}
+
+function emptyMeshArcReceiverStatus(): MeshArcReceiverStatus {
+  return { state: 'idle', sent: 0, registered: 0 };
 }
 
 interface VpnStopRequest {
@@ -200,6 +233,7 @@ interface BackendHealthSnapshot {
   status: string;
   peers: PeerSummary[];
   taildrop: TaildropSnapshot;
+  meshArcReceiver: MeshArcReceiverStatus;
 }
 
 interface PeerConnectivityRequest {
@@ -232,6 +266,26 @@ interface MediaServiceProbeResponse {
   result: string;
 }
 
+interface LocalSendRefreshRequest {
+  requestId: number;
+}
+
+interface LocalSendRefreshResponse {
+  requestId: number;
+  status: string;
+}
+
+interface TaildriveExtensionRequest {
+  requestId: number;
+  operation: string;
+  payload: string;
+}
+
+interface TaildriveExtensionResponse {
+  requestId: number;
+  result: string;
+}
+
 function emptyTaildropTransfer(): TaildropTransferSummary {
   return {
     requestId: 0, state: 'idle', reason: '', targetKey: '', targetName: '', fileName: '',
@@ -253,9 +307,13 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
   private peerConnectivityInFlight: boolean = false;
   private sunshineProbeInFlight: boolean = false;
   private mediaServiceProbeInFlight: boolean = false;
+  private localSendRefreshInFlight: boolean = false;
   private taildropSendInFlight: boolean = false;
   private taildropCancelInFlight: boolean = false;
   private taildropReceiveInFlight: boolean = false;
+  private taildriveQueryInFlight: boolean = false;
+  private taildriveTransferInFlight: boolean = false;
+  private taildriveControlInFlight: boolean = false;
   private backendStopInFlight: boolean = false;
   private destroying: boolean = false;
   private taildropInboxNotificationInitialized: boolean = false;
@@ -268,19 +326,27 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
 
   onCreate(want: Want): void {
     this.recordDiagnosticEvent('vpn_extension_created', 'lifecycle');
-    this.writePeerSnapshot([]);
+    this.writePeerSnapshot([], emptyMeshArcReceiverStatus());
     this.cleanupStaleTaildropOutbox();
     this.cleanupStaleTaildropInbox();
     this.writeTextFile(`${this.context.filesDir}/${TAILDROP_SEND_REQUEST_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${TAILDROP_CANCEL_REQUEST_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${TAILDROP_RECEIVE_REQUEST_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${TAILDROP_RECEIVE_RESPONSE_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_QUERY_REQUEST_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_QUERY_RESPONSE_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_TRANSFER_REQUEST_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_TRANSFER_RESPONSE_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_CONTROL_REQUEST_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${TAILDRIVE_CONTROL_RESPONSE_FILE_NAME}`, '');
     // A previous extension process can be killed before consuming a graceful
     // stop request. Never let that stale request stop a newly created session.
     this.writeTextFile(`${this.context.filesDir}/${VPN_STOP_REQUEST_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${VPN_STOP_RESPONSE_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${VPN_BACKEND_HANDOFF_REQUEST_FILE_NAME}`, '');
     this.writeTextFile(`${this.context.filesDir}/${VPN_BACKEND_HANDOFF_RESPONSE_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${LOCAL_SEND_REFRESH_REQUEST_FILE_NAME}`, '');
+    this.writeTextFile(`${this.context.filesDir}/${LOCAL_SEND_REFRESH_RESPONSE_FILE_NAME}`, '');
     this.startBackendStopWatcher();
     this.writeTextFile(`${this.context.filesDir}/${VPN_CONFIG_SUMMARY_FILE_NAME}`, '');
     this.writeTaildropSnapshot({
@@ -806,6 +872,11 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       this.processTaildropSendRequest();
       this.processTaildropCancelRequest();
       this.processTaildropReceiveRequest();
+      this.processTaildriveQueryRequest();
+      this.processTaildriveTransferRequest();
+      this.processTaildriveControlRequest();
+      this.processLocalSendRefreshRequest();
+      this.processPeerConnectivityRequest();
     }, 100);
     // The regular backend snapshot can wait on file-target and inbox queries.
     // Keep receive notifications tied to the IPN-bus state so a fast transfer
@@ -827,13 +898,13 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       }
       this.statusUpdateInFlight = true;
       nativeBridge.backendSnapshot()
-        .then((snapshotText: string) => {
+        .then((snapshotText: string): void => {
           if (this.destroying) {
             return;
           }
           const snapshot: BackendHealthSnapshot = JSON.parse(snapshotText) as BackendHealthSnapshot;
           this.writeStatus(snapshot.status);
-          this.writePeerSnapshot(snapshot.peers);
+          this.writePeerSnapshot(snapshot.peers, snapshot.meshArcReceiver);
           this.writeTaildropSnapshot(snapshot.taildrop);
           this.processPeerConnectivityRequest();
           this.processSunshineProbeRequest();
@@ -907,13 +978,61 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       JSON.stringify(persisted));
   }
 
-  private writePeerSnapshot(peers: PeerSummary[]): void {
+  private writePeerSnapshot(peers: PeerSummary[], meshArcReceiver: MeshArcReceiverStatus): void {
     const persisted: PersistedPeerSnapshot = {
       peers: peers,
+      meshArcReceiver: meshArcReceiver,
       updatedAtMs: Date.now()
     };
     this.writeAtomicTextFile(`${this.context.filesDir}/${VPN_PEERS_FILE_NAME}`,
       JSON.stringify(persisted));
+  }
+
+  private processLocalSendRefreshRequest(): void {
+    if (this.localSendRefreshInFlight || this.destroying || this.backendStopInFlight) {
+      return;
+    }
+    const requestPath: string = `${this.context.filesDir}/${LOCAL_SEND_REFRESH_REQUEST_FILE_NAME}`;
+    try {
+      if (!fileIo.accessSync(requestPath)) {
+        return;
+      }
+      const requestText: string = fileIo.readTextSync(requestPath).trim();
+      if (requestText.length === 0) {
+        return;
+      }
+      this.writeTextFile(requestPath, '');
+      const request: LocalSendRefreshRequest = JSON.parse(requestText) as LocalSendRefreshRequest;
+      if (request.requestId <= 0) {
+        return;
+      }
+      this.localSendRefreshInFlight = true;
+      nativeBridge.backendLocalSendRefreshAsync()
+        .then((status: string): Promise<void> => nativeBridge.backendSnapshot()
+          .then((snapshotText: string): void => {
+            if (this.destroying) {
+              return;
+            }
+            const snapshot: BackendHealthSnapshot = JSON.parse(snapshotText) as BackendHealthSnapshot;
+            this.writePeerSnapshot(snapshot.peers, snapshot.meshArcReceiver);
+            const response: LocalSendRefreshResponse = { requestId: request.requestId, status: status };
+            this.writeTextFile(`${this.context.filesDir}/${LOCAL_SEND_REFRESH_RESPONSE_FILE_NAME}`,
+              JSON.stringify(response));
+          }))
+        .catch(() => {
+          const response: LocalSendRefreshResponse = {
+            requestId: request.requestId,
+            status: 'FAILED | LocalSend refresh | extension error'
+          };
+          this.writeTextFile(`${this.context.filesDir}/${LOCAL_SEND_REFRESH_RESPONSE_FILE_NAME}`,
+            JSON.stringify(response));
+        })
+        .finally(() => {
+          this.localSendRefreshInFlight = false;
+        });
+    } catch (_error) {
+      this.writeTextFile(requestPath, '');
+    }
   }
 
   private processBackendStopRequest(): boolean {
@@ -1140,6 +1259,117 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
       this.writeTextFile(requestPath, '');
       this.recordDiagnosticEvent('media_probe_failed', 'request_parse');
     }
+  }
+
+  private processTaildriveQueryRequest(): void {
+    if (this.taildriveQueryInFlight || this.destroying || this.backendStopInFlight) {
+      return;
+    }
+    const request: TaildriveExtensionRequest | undefined = this.takeTaildriveRequest(
+      TAILDRIVE_QUERY_REQUEST_FILE_NAME, ['list', 'stat', 'mutate']);
+    if (request === undefined) {
+      return;
+    }
+    this.taildriveQueryInFlight = true;
+    let task: Promise<string>;
+    if (request.operation === 'list') {
+      task = nativeBridge.backendTaildriveListAsync(request.payload);
+    } else if (request.operation === 'stat') {
+      task = nativeBridge.backendTaildriveStatAsync(request.payload);
+    } else {
+      task = nativeBridge.backendTaildriveMutateAsync(request.payload);
+    }
+    this.completeTaildriveRequest(TAILDRIVE_QUERY_RESPONSE_FILE_NAME, request, task,
+      () => this.taildriveQueryInFlight = false);
+  }
+
+  private processTaildriveTransferRequest(): void {
+    if (this.taildriveTransferInFlight || this.destroying || this.backendStopInFlight) {
+      return;
+    }
+    const request: TaildriveExtensionRequest | undefined = this.takeTaildriveRequest(
+      TAILDRIVE_TRANSFER_REQUEST_FILE_NAME, ['download', 'upload']);
+    if (request === undefined) {
+      return;
+    }
+    this.taildriveTransferInFlight = true;
+    const task: Promise<string> = request.operation === 'download' ?
+      nativeBridge.backendTaildriveDownloadAsync(request.payload) :
+      nativeBridge.backendTaildriveUploadAsync(request.payload);
+    this.completeTaildriveRequest(TAILDRIVE_TRANSFER_RESPONSE_FILE_NAME, request, task,
+      () => this.taildriveTransferInFlight = false);
+  }
+
+  private processTaildriveControlRequest(): void {
+    if (this.taildriveControlInFlight || this.destroying || this.backendStopInFlight) {
+      return;
+    }
+    const request: TaildriveExtensionRequest | undefined = this.takeTaildriveRequest(
+      TAILDRIVE_CONTROL_REQUEST_FILE_NAME, ['snapshot', 'cancel']);
+    if (request === undefined) {
+      return;
+    }
+    this.taildriveControlInFlight = true;
+    const task: Promise<string> = request.operation === 'snapshot' ?
+      nativeBridge.backendTaildriveTransferSnapshotAsync() : nativeBridge.backendTaildriveCancelAsync();
+    this.completeTaildriveRequest(TAILDRIVE_CONTROL_RESPONSE_FILE_NAME, request, task,
+      () => this.taildriveControlInFlight = false);
+  }
+
+  private takeTaildriveRequest(fileName: string,
+    allowedOperations: string[]): TaildriveExtensionRequest | undefined {
+    const requestPath: string = `${this.context.filesDir}/${fileName}`;
+    try {
+      if (!fileIo.accessSync(requestPath)) {
+        return undefined;
+      }
+      const requestText: string = fileIo.readTextSync(requestPath).trim();
+      if (requestText.length === 0) {
+        return undefined;
+      }
+      this.writeTextFile(requestPath, '');
+      const request: TaildriveExtensionRequest = JSON.parse(requestText) as TaildriveExtensionRequest;
+      if (!Number.isInteger(request.requestId) || request.requestId <= 0 ||
+        !allowedOperations.includes(request.operation) || typeof request.payload !== 'string' ||
+        request.payload.length > 32768) {
+        return undefined;
+      }
+      return request;
+    } catch (_error) {
+      this.writeTextFile(requestPath, '');
+      return undefined;
+    }
+  }
+
+  private completeTaildriveRequest(responseFileName: string, request: TaildriveExtensionRequest,
+    task: Promise<string>, finish: () => void): void {
+    task.then((result: string) => {
+      const response: TaildriveExtensionResponse = { requestId: request.requestId, result: result };
+      this.writeAtomicTextFile(`${this.context.filesDir}/${responseFileName}`, JSON.stringify(response));
+    }).catch(() => {
+      const response: TaildriveExtensionResponse = {
+        requestId: request.requestId,
+        result: this.taildriveExtensionFailure(request.operation)
+      };
+      this.writeAtomicTextFile(`${this.context.filesDir}/${responseFileName}`, JSON.stringify(response));
+    }).finally(finish);
+  }
+
+  private taildriveExtensionFailure(operation: string): string {
+    if (operation === 'list') {
+      return '{"state":"failed","path":"/","entries":[],"reason":"extension_error"}';
+    }
+    if (operation === 'stat') {
+      return '{"state":"failed","entry":{"name":"","path":"","kind":"","size":0,' +
+        '"modifiedAtMs":0},"reason":"extension_error"}';
+    }
+    if (operation === 'mutate') {
+      return '{"state":"failed","operation":"","path":"","newPath":"",' +
+        '"reason":"extension_error"}';
+    }
+    return '{"requestId":0,"direction":"","state":"failed","reason":"extension_error",' +
+      '"remotePath":"","localPath":"","fileName":"","bytes":0,"totalBytes":0,' +
+      '"startedAtMs":0,"completedAtMs":0}';
   }
 
   private taildropOutboxRoot(): string {
@@ -1691,7 +1921,7 @@ export default class TailscaleVpnExtensionAbility extends VpnExtensionAbility {
     } catch (_error) {
       this.recordDiagnosticEvent('vpn_backend_stop_failed', 'destroy');
     }
-    this.writePeerSnapshot([]);
+    this.writePeerSnapshot([], emptyMeshArcReceiverStatus());
     const finalTransfer: TaildropTransferSummary = this.latestTaildropSnapshot.transfer.state === 'sending' ||
       this.latestTaildropSnapshot.transfer.state === 'queued' ?
       this.failedTaildropTransfer(this.latestTaildropSnapshot.transfer.requestId, 'disconnected',

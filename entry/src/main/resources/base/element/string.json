@@ -2,11 +2,503 @@
   "string": [
     {
       "name": "permission_short_term_write_imagevideo_reason",
-      "value": "Save received images and videos to the system gallery."
+      "value": "Save received images and videos to the system gallery"
+    },
+    {
+      "name": "taildrive_title",
+      "value": "Taildrive files"
+    },
+    {
+      "name": "taildrive_subtitle",
+      "value": "Browse folders shared by devices in your tailnet"
+    },
+    {
+      "name": "taildrive_connect_first",
+      "value": "Connect Tailscale to browse remote files"
+    },
+    {
+      "name": "taildrive_refresh_action",
+      "value": "Refresh"
+    },
+    {
+      "name": "taildrive_up_action",
+      "value": "Up"
+    },
+    {
+      "name": "taildrive_new_folder_action",
+      "value": "New folder"
+    },
+    {
+      "name": "taildrive_new_folder_default_name",
+      "value": "New folder"
+    },
+    {
+      "name": "taildrive_upload_action",
+      "value": "Upload"
+    },
+    {
+      "name": "taildrive_download_action",
+      "value": "Download"
+    },
+    {
+      "name": "taildrive_details_action",
+      "value": "Details"
+    },
+    {
+      "name": "taildrive_move_action",
+      "value": "Move"
+    },
+    {
+      "name": "taildrive_search_placeholder",
+      "value": "Search this folder"
+    },
+    {
+      "name": "taildrive_search_action",
+      "value": "Search"
+    },
+    {
+      "name": "taildrive_multi_select_action",
+      "value": "Select"
+    },
+    {
+      "name": "taildrive_done_action",
+      "value": "Done"
+    },
+    {
+      "name": "taildrive_selected_count",
+      "value": "%d selected"
+    },
+    {
+      "name": "taildrive_selection_empty",
+      "value": "Nothing selected"
+    },
+    {
+      "name": "taildrive_selected_total",
+      "value": "Total %s"
+    },
+    {
+      "name": "taildrive_select_all_action",
+      "value": "Select all"
+    },
+    {
+      "name": "taildrive_deselect_all_action",
+      "value": "Deselect all"
+    },
+    {
+      "name": "taildrive_share_action",
+      "value": "Share"
+    },
+    {
+      "name": "taildrive_copy_action",
+      "value": "Copy"
+    },
+    {
+      "name": "taildrive_more_action",
+      "value": "More"
+    },
+    {
+      "name": "taildrive_preview_download_title",
+      "value": "Download to preview"
+    },
+    {
+      "name": "taildrive_preview_download_message",
+      "value": "Before previewing \"%s\", download it to this app's private folder.\\nType: %s\\nSize: %s"
+    },
+    {
+      "name": "taildrive_preview_download_action",
+      "value": "Download"
+    },
+    {
+      "name": "taildrive_preview_download_hint",
+      "value": "This file is 5 MB or larger. Download it before previewing"
+    },
+    {
+      "name": "taildrive_loading",
+      "value": "Loading files…"
+    },
+    {
+      "name": "taildrive_sort_name",
+      "value": "Sort by name"
+    },
+    {
+      "name": "taildrive_sort_modified",
+      "value": "Sort by time"
+    },
+    {
+      "name": "taildrive_sort_size",
+      "value": "Sort by size"
+    },
+    {
+      "name": "taildrive_sort_group_title",
+      "value": "Sort and group"
+    },
+    {
+      "name": "taildrive_arrangement_action",
+      "value": "Layout"
+    },
+    {
+      "name": "taildrive_sort_section",
+      "value": "Sort by"
+    },
+    {
+      "name": "taildrive_sort_direction_section",
+      "value": "Order"
+    },
+    {
+      "name": "taildrive_sort_ascending",
+      "value": "Ascending"
+    },
+    {
+      "name": "taildrive_sort_descending",
+      "value": "Descending"
+    },
+    {
+      "name": "taildrive_group_section",
+      "value": "Group by"
+    },
+    {
+      "name": "taildrive_group_none",
+      "value": "No grouping"
+    },
+    {
+      "name": "taildrive_group_by_type",
+      "value": "File type"
+    },
+    {
+      "name": "taildrive_group_by_date",
+      "value": "Modified date"
+    },
+    {
+      "name": "taildrive_group_folders",
+      "value": "Folders"
+    },
+    {
+      "name": "taildrive_group_images",
+      "value": "Images"
+    },
+    {
+      "name": "taildrive_group_videos",
+      "value": "Videos"
+    },
+    {
+      "name": "taildrive_group_documents",
+      "value": "Documents"
+    },
+    {
+      "name": "taildrive_group_archives",
+      "value": "Archives and apps"
+    },
+    {
+      "name": "taildrive_group_other",
+      "value": "Other"
+    },
+    {
+      "name": "taildrive_group_today",
+      "value": "Today"
+    },
+    {
+      "name": "taildrive_group_yesterday",
+      "value": "Yesterday"
+    },
+    {
+      "name": "taildrive_group_this_week",
+      "value": "Last 7 days"
+    },
+    {
+      "name": "taildrive_group_earlier",
+      "value": "Earlier"
+    },
+    {
+      "name": "taildrive_group_unknown_date",
+      "value": "Date unavailable"
+    },
+    {
+      "name": "taildrive_retry_action",
+      "value": "Retry"
+    },
+    {
+      "name": "taildrive_details_title",
+      "value": "File details"
+    },
+    {
+      "name": "taildrive_details_type",
+      "value": "Type"
+    },
+    {
+      "name": "taildrive_details_path",
+      "value": "Path"
+    },
+    {
+      "name": "taildrive_details_size",
+      "value": "Size"
+    },
+    {
+      "name": "taildrive_details_modified",
+      "value": "Modified"
+    },
+    {
+      "name": "taildrive_details_content_type",
+      "value": "Content type"
+    },
+    {
+      "name": "taildrive_type_folder",
+      "value": "Folder"
+    },
+    {
+      "name": "taildrive_type_tailnet",
+      "value": "Tailnet"
+    },
+    {
+      "name": "taildrive_type_device",
+      "value": "Remote device"
+    },
+    {
+      "name": "taildrive_type_share",
+      "value": "Shared folder"
+    },
+    {
+      "name": "taildrive_type_file",
+      "value": "File"
+    },
+    {
+      "name": "taildrive_move_title",
+      "value": "Choose destination"
+    },
+    {
+      "name": "taildrive_move_here_action",
+      "value": "Move here"
+    },
+    {
+      "name": "taildrive_overwrite_title",
+      "value": "Replace existing item?"
+    },
+    {
+      "name": "taildrive_replace_action",
+      "value": "Replace"
+    },
+    {
+      "name": "taildrive_empty",
+      "value": "No shared files or folders here"
+    },
+    {
+      "name": "taildrive_list_failed",
+      "value": "Unable to read this folder. Check Taildrive permissions and try again"
+    },
+    {
+      "name": "taildrive_rename_action",
+      "value": "Rename"
+    },
+    {
+      "name": "taildrive_delete_action",
+      "value": "Delete"
+    },
+    {
+      "name": "taildrive_delete_title",
+      "value": "Delete remote item?"
+    },
+    {
+      "name": "taildrive_delete_selected_message",
+      "value": "Delete %d selected items? This cannot be undone"
+    },
+    {
+      "name": "taildrive_new_folder_title",
+      "value": "New folder"
+    },
+    {
+      "name": "taildrive_rename_title",
+      "value": "Rename"
+    },
+    {
+      "name": "taildrive_name_placeholder",
+      "value": "Name"
+    },
+    {
+      "name": "confirm_action",
+      "value": "Confirm"
+    },
+    {
+      "name": "taildrive_transfer_in_progress",
+      "value": "Transferring file"
+    },
+    {
+      "name": "taildrive_status_select_failed",
+      "value": "Could not open the file picker"
+    },
+    {
+      "name": "taildrive_status_uploading",
+      "value": "Uploading…"
+    },
+    {
+      "name": "taildrive_status_upload_completed",
+      "value": "Upload completed"
+    },
+    {
+      "name": "taildrive_status_upload_failed",
+      "value": "Upload failed"
+    },
+    {
+      "name": "taildrive_status_downloading",
+      "value": "Downloading…"
+    },
+    {
+      "name": "taildrive_status_export_cancelled",
+      "value": "Save cancelled"
+    },
+    {
+      "name": "taildrive_status_download_completed",
+      "value": "File saved"
+    },
+    {
+      "name": "taildrive_status_export_failed",
+      "value": "Could not save the downloaded file"
+    },
+    {
+      "name": "taildrive_status_deleting",
+      "value": "Deleting…"
+    },
+    {
+      "name": "taildrive_status_delete_completed",
+      "value": "Deleted"
+    },
+    {
+      "name": "taildrive_status_delete_failed",
+      "value": "Delete failed"
+    },
+    {
+      "name": "taildrive_status_creating_folder",
+      "value": "Creating folder…"
+    },
+    {
+      "name": "taildrive_status_renaming",
+      "value": "Renaming…"
+    },
+    {
+      "name": "taildrive_status_moving",
+      "value": "Moving…"
+    },
+    {
+      "name": "taildrive_status_move_completed",
+      "value": "Move completed"
+    },
+    {
+      "name": "taildrive_status_mutation_completed",
+      "value": "Change completed"
+    },
+    {
+      "name": "taildrive_status_mutation_failed",
+      "value": "Could not change the remote item"
+    },
+    {
+      "name": "taildrive_status_invalid_name",
+      "value": "Enter a valid file or folder name"
+    },
+    {
+      "name": "taildrive_status_same_location",
+      "value": "The item is already in this folder"
+    },
+    {
+      "name": "taildrive_status_target_not_found",
+      "value": "This device has no visible Taildrive share. Showing all shares instead"
+    },
+    {
+      "name": "taildrive_status_permission_denied",
+      "value": "Taildrive permission was denied"
+    },
+    {
+      "name": "taildrive_status_not_found",
+      "value": "The remote item is no longer available"
+    },
+    {
+      "name": "taildrive_status_already_exists",
+      "value": "An item with this name already exists"
+    },
+    {
+      "name": "taildrive_status_backend_unavailable",
+      "value": "Connect Tailscale and try again"
+    },
+    {
+      "name": "taildrive_status_busy",
+      "value": "Another Taildrive transfer is still in progress"
+    },
+    {
+      "name": "taildrive_status_cancelled",
+      "value": "Transfer cancelled"
+    },
+    {
+      "name": "taildrive_status_timeout",
+      "value": "The remote operation timed out"
+    },
+    {
+      "name": "taildrive_status_no_space",
+      "value": "There is not enough storage space"
+    },
+    {
+      "name": "taildrive_status_remote_unavailable",
+      "value": "The remote device is unavailable"
+    },
+    {
+      "name": "taildrive_status_network_interrupted",
+      "value": "The network transfer was interrupted"
+    },
+    {
+      "name": "taildrive_status_file_unavailable",
+      "value": "The selected file is no longer available"
+    },
+    {
+      "name": "taildrive_status_transfer_failed",
+      "value": "The Taildrive operation failed"
+    },
+    {
+      "name": "taildrive_status_preview_downloading",
+      "value": "Downloading for preview..."
+    },
+    {
+      "name": "taildrive_status_preview_download_completed",
+      "value": "Downloaded. Opening preview…"
+    },
+    {
+      "name": "taildrive_status_preview_download_failed",
+      "value": "Could not download the file for preview"
+    },
+    {
+      "name": "taildrive_status_preview_failed",
+      "value": "No compatible system preview is available"
+    },
+    {
+      "name": "taildrive_status_paths_copied",
+      "value": "Remote paths copied"
+    },
+    {
+      "name": "taildrive_status_copy_failed",
+      "value": "Could not copy the remote paths"
+    },
+    {
+      "name": "taildrive_status_share_failed",
+      "value": "Could not open the share panel"
+    },
+    {
+      "name": "taildrive_status_select_one_for_details",
+      "value": "Select one file to use this action"
+    },
+    {
+      "name": "notification_taildrive_uploading_title",
+      "value": "Uploading remote file"
+    },
+    {
+      "name": "notification_taildrive_downloading_title",
+      "value": "Downloading remote file"
+    },
+    {
+      "name": "notification_taildrive_completed_title",
+      "value": "Remote file transfer completed"
+    },
+    {
+      "name": "notification_taildrive_failed_title",
+      "value": "Remote file transfer failed"
     },
     {
       "name": "transfer_send_interrupted",
-      "value": "The network transfer was interrupted after automatic resume attempts. Try again."
+      "value": "The network transfer was interrupted after automatic resume attempts. Try again"
     },
     {
       "name": "transfer_detecting_title",
@@ -14,7 +506,7 @@
     },
     {
       "name": "transfer_detecting_description",
-      "value": "Reading Taildrop capability and devices from the VPN backend."
+      "value": "Reading Taildrop capability and devices from the VPN backend"
     },
     {
       "name": "transfer_admin_disabled_title",
@@ -22,7 +514,7 @@
     },
     {
       "name": "transfer_admin_disabled_description",
-      "value": "Enable file sending in the Tailscale admin console."
+      "value": "Enable file sending in the Tailscale admin console"
     },
     {
       "name": "transfer_unavailable_title",
@@ -30,7 +522,7 @@
     },
     {
       "name": "transfer_unavailable_description",
-      "value": "Transfer devices could not be read. Try again shortly."
+      "value": "Transfer devices could not be read. Try again shortly"
     },
     {
       "name": "transfer_targets_ready_title",
@@ -38,7 +530,7 @@
     },
     {
       "name": "transfer_targets_ready_description",
-      "value": "Tap an online device to send files, or save files waiting in your inbox."
+      "value": "Tap an online device to send files, or save files waiting in your inbox"
     },
     {
       "name": "transfer_targets_title",
@@ -46,7 +538,11 @@
     },
     {
       "name": "transfer_no_targets_description",
-      "value": "No eligible devices found. Make sure another Taildrop device is online."
+      "value": "No devices are available for file sending"
+    },
+    {
+      "name": "transfer_send_file_action",
+      "value": "Send files"
     },
     {
       "name": "transfer_send_completed",
@@ -54,47 +550,47 @@
     },
     {
       "name": "transfer_send_failed",
-      "value": "File transfer failed. Try again."
+      "value": "File transfer failed. Try again"
     },
     {
       "name": "transfer_send_target_unavailable",
-      "value": "The selected device is no longer available."
+      "value": "The selected device is no longer available"
     },
     {
       "name": "transfer_send_disconnected",
-      "value": "Tailscale disconnected before the transfer finished."
+      "value": "Tailscale disconnected before the transfer finished"
     },
     {
       "name": "transfer_send_permission_denied",
-      "value": "The selected files cannot be read."
+      "value": "The selected files cannot be read"
     },
     {
       "name": "transfer_send_no_space",
-      "value": "There is not enough storage space to prepare this transfer."
+      "value": "There is not enough storage space to prepare this transfer"
     },
     {
       "name": "transfer_send_file_unavailable",
-      "value": "A selected file is no longer available."
+      "value": "A selected file is no longer available"
     },
     {
       "name": "transfer_send_file_changed",
-      "value": "A selected file changed before it could be sent."
+      "value": "A selected file changed before it could be sent"
     },
     {
       "name": "transfer_send_backend_unavailable",
-      "value": "The VPN backend is not ready for this transfer."
+      "value": "The VPN backend is not ready for this transfer"
     },
     {
       "name": "transfer_busy_message",
-      "value": "A transfer is already in progress."
+      "value": "A transfer is already in progress"
     },
     {
       "name": "transfer_file_selection_failed",
-      "value": "Could not open the file picker."
+      "value": "Could not open the file picker"
     },
     {
       "name": "transfer_file_copy_failed",
-      "value": "Could not prepare the selected files."
+      "value": "Could not prepare the selected files"
     },
     {
       "name": "transfer_send_action",
@@ -107,6 +603,62 @@
     {
       "name": "transfer_source_message",
       "value": "Send to %s"
+    },
+    {
+      "name": "transfer_method_title",
+      "value": "Choose a transfer method"
+    },
+    {
+      "name": "transfer_method_message",
+      "value": "Choose how to send files to %s"
+    },
+    {
+      "name": "transfer_method_tailsend_title",
+      "value": "Taildrop"
+    },
+    {
+      "name": "transfer_method_tailsend_description",
+      "value": "Transfer with the built-in Taildrop service"
+    },
+    {
+      "name": "transfer_method_localsend_title",
+      "value": "Quick Transfer"
+    },
+    {
+      "name": "transfer_method_localsend_description",
+      "value": "Send files to remote LocalSend through Quick Transfer"
+    },
+    {
+      "name": "transfer_method_remembered",
+      "value": "You will be asked whenever both protocols are online"
+    },
+    {
+      "name": "transfer_protocol_online",
+      "value": "%s online"
+    },
+    {
+      "name": "transfer_protocol_checking",
+      "value": "%s checking"
+    },
+    {
+      "name": "transfer_protocol_offline",
+      "value": "%s offline"
+    },
+    {
+      "name": "transfer_protocol_refresh_action",
+      "value": "Refresh"
+    },
+    {
+      "name": "transfer_protocol_refreshing",
+      "value": "Refreshing"
+    },
+    {
+      "name": "transfer_localsend_open_hint",
+      "value": "Opening LocalSend..."
+    },
+    {
+      "name": "transfer_localsend_open_failed",
+      "value": "LocalSend is not installed or could not be opened"
     },
     {
       "name": "transfer_file_action",
@@ -142,7 +694,7 @@
     },
     {
       "name": "transfer_cancel_failed",
-      "value": "Could not cancel the transfer."
+      "value": "Could not cancel the transfer"
     },
     {
       "name": "transfer_cancelling",
@@ -150,7 +702,7 @@
     },
     {
       "name": "transfer_send_cancelled",
-      "value": "File transfer cancelled."
+      "value": "File transfer cancelled"
     },
     {
       "name": "transfer_preparing",
@@ -174,7 +726,7 @@
     },
     {
       "name": "transfer_receive_picker_failed",
-      "value": "Could not choose where to save the file."
+      "value": "Could not choose where to save the file"
     },
     {
       "name": "transfer_receive_completed",
@@ -190,27 +742,27 @@
     },
     {
       "name": "transfer_receive_unavailable",
-      "value": "The received file is no longer available."
+      "value": "The received file is no longer available"
     },
     {
       "name": "transfer_receive_no_space",
-      "value": "There is not enough storage space to save this file."
+      "value": "There is not enough storage space to save this file"
     },
     {
       "name": "transfer_receive_delete_failed",
-      "value": "The content was handled, but its inbox copy could not be removed."
+      "value": "The content was handled, but its inbox copy could not be removed"
     },
     {
       "name": "transfer_receive_failed",
-      "value": "Could not save the received file. Try again."
+      "value": "Could not save the received file. Try again"
     },
     {
       "name": "transfer_save_timeout",
-      "value": "Saving timed out. You can try again without restarting the app."
+      "value": "Saving timed out. You can try again without restarting the app"
     },
     {
       "name": "transfer_receive_cancelled",
-      "value": "Saving cancelled. You can try again."
+      "value": "Saving cancelled. You can try again"
     },
     {
       "name": "transfer_media_ready_to_save",
@@ -218,19 +770,19 @@
     },
     {
       "name": "transfer_media_save_failed",
-      "value": "Could not save this media to Gallery. Try again."
+      "value": "Could not save this media to Gallery. Try again"
     },
     {
       "name": "transfer_media_save_authorization_failed",
-      "value": "Gallery save authorization was not granted."
+      "value": "Gallery save authorization was not granted"
     },
     {
       "name": "transfer_gallery_failed",
-      "value": "Could not save the image to Photos. Try again."
+      "value": "Could not save the image to Photos. Try again"
     },
     {
       "name": "transfer_text_copy_failed",
-      "value": "Could not copy the received text. Try again."
+      "value": "Could not copy the received text. Try again"
     },
     {
       "name": "transfer_content_image",
@@ -266,7 +818,7 @@
     },
     {
       "name": "transfer_discard_confirm_message",
-      "value": "This permanently removes \"%s\" from the Taildrop inbox."
+      "value": "This permanently removes \"%s\" from the Taildrop inbox"
     },
     {
       "name": "transfer_discard_completed",
@@ -274,7 +826,7 @@
     },
     {
       "name": "transfer_discard_failed",
-      "value": "Could not discard this file. Try again."
+      "value": "Could not discard this file. Try again"
     },
     {
       "name": "transfer_retry_action",
@@ -282,7 +834,7 @@
     },
     {
       "name": "transfer_retry_choose_content",
-      "value": "Choose the content to resend."
+      "value": "Choose the content to resend"
     },
     {
       "name": "transfer_sent_status",
@@ -302,11 +854,11 @@
     },
     {
       "name": "transfer_inbox_unavailable",
-      "value": "The Taildrop inbox is temporarily unavailable."
+      "value": "The Taildrop inbox is temporarily unavailable"
     },
     {
       "name": "transfer_inbox_empty",
-      "value": "Files sent to this device will appear here."
+      "value": "Files sent to this device will appear here"
     },
     {
       "name": "transfer_clear_cache_action",
@@ -318,7 +870,7 @@
     },
     {
       "name": "transfer_clear_cache_confirm_message",
-      "value": "This permanently deletes all received files stored in the app's private directory."
+      "value": "This permanently deletes all received files stored in the app's private directory"
     },
     {
       "name": "transfer_clearing_cache",
@@ -330,7 +882,7 @@
     },
     {
       "name": "transfer_clear_cache_failed",
-      "value": "Could not clear all received file cache. Try again."
+      "value": "Could not clear all received file cache. Try again"
     },
     {
       "name": "module_desc",
@@ -354,11 +906,15 @@
     },
     {
       "name": "tab_home",
-      "value": "Home"
+      "value": "Devices"
     },
     {
       "name": "tab_transfer",
       "value": "Transfer"
+    },
+    {
+      "name": "tab_files",
+      "value": "Files"
     },
     {
       "name": "tab_settings",
@@ -366,7 +922,27 @@
     },
     {
       "name": "transfer_subtitle",
-      "value": "Secure file transfer between your devices"
+      "value": "Send and receive files over multiple protocols"
+    },
+    {
+      "name": "transfer_send_files_title",
+      "value": "Send files"
+    },
+    {
+      "name": "transfer_localsend_description",
+      "value": "Discover MeshSend devices over Tailscale; sending is handled by the LocalSend service"
+    },
+    {
+      "name": "transfer_localsend_device_count",
+      "value": "%d MeshSend devices discovered"
+    },
+    {
+      "name": "transfer_localsend_checking_description",
+      "value": "Checking for MeshSend devices"
+    },
+    {
+      "name": "transfer_localsend_empty_description",
+      "value": "No MeshSend devices are available right now"
     },
     {
       "name": "transfer_taildrop_title",
@@ -374,7 +950,7 @@
     },
     {
       "name": "transfer_taildrop_description",
-      "value": "Secure file transfer powered by Taildrop."
+      "value": "Send files, media, and text with MeshSend (Tailscale Taildrop)"
     },
     {
       "name": "transfer_connected_title",
@@ -382,7 +958,7 @@
     },
     {
       "name": "transfer_connected_description",
-      "value": "Send files to online devices and save files received by this device."
+      "value": "Send files to online devices and save files received by this device"
     },
     {
       "name": "transfer_connect_first_title",
@@ -390,7 +966,75 @@
     },
     {
       "name": "transfer_connect_first_description",
-      "value": "Connect Tailscale to send or receive. Existing received files and transfer history remain available below."
+      "value": "Connect Tailscale to send or receive. Existing received files and transfer history remain available below"
+    },
+    {
+      "name": "transfer_remote_cached_title",
+      "value": "MeshArc is not connected"
+    },
+    {
+      "name": "transfer_remote_cached_description",
+      "value": "Cached remote devices stay visible; MeshArc is only needed when you send"
+    },
+    {
+      "name": "transfer_remote_devices_title",
+      "value": "Remote devices"
+    },
+    {
+      "name": "transfer_remote_devices_description",
+      "value": "Cached from MeshArc; try LocalSend directly when you send"
+    },
+    {
+      "name": "transfer_remote_cached_badge",
+      "value": "MeshArc"
+    },
+    {
+      "name": "transfer_remote_localsend_port",
+      "value": "LocalSend · Port %d"
+    },
+    {
+      "name": "transfer_remote_port_label",
+      "value": "Port %d"
+    },
+    {
+      "name": "transfer_remote_port_action",
+      "value": "Set port"
+    },
+    {
+      "name": "transfer_remote_port_title",
+      "value": "LocalSend port"
+    },
+    {
+      "name": "transfer_remote_port_message",
+      "value": "Try 53317 by default. If this device uses a custom LocalSend port, save it here"
+    },
+    {
+      "name": "transfer_remote_port_placeholder",
+      "value": "53317"
+    },
+    {
+      "name": "transfer_remote_port_save",
+      "value": "Save port"
+    },
+    {
+      "name": "transfer_remote_port_invalid",
+      "value": "Enter a port from 1 to 65535"
+    },
+    {
+      "name": "transfer_remote_port_saved",
+      "value": "LocalSend port saved for this device"
+    },
+    {
+      "name": "transfer_remote_waiting_description",
+      "value": "Waiting for LocalSend detection"
+    },
+    {
+      "name": "transfer_remote_waiting_connection",
+      "value": "Online · awaiting connection"
+    },
+    {
+      "name": "transfer_remote_service_unavailable_description",
+      "value": "LocalSend was not found on the last check"
     },
     {
       "name": "transfer_history_title",
@@ -410,7 +1054,7 @@
     },
     {
       "name": "transfer_empty_description",
-      "value": "Sent and received files will appear here when Taildrop is enabled."
+      "value": "Sent and received files will appear here when Taildrop is enabled"
     },
     {
       "name": "glow_title",
@@ -418,7 +1062,7 @@
     },
     {
       "name": "glow_description",
-      "value": "Adjust the light response on buttons and the bottom bar."
+      "value": "Adjust the light response on buttons and the bottom bar"
     },
     {
       "name": "glow_exquisite",
@@ -443,6 +1087,18 @@
     {
       "name": "connection_connecting",
       "value": "Connecting"
+    },
+    {
+      "name": "device_connection_connecting",
+      "value": "Connecting"
+    },
+    {
+      "name": "device_connection_waiting",
+      "value": "Online · awaiting connection"
+    },
+    {
+      "name": "connection_recovering",
+      "value": "Reconnecting"
     },
     {
       "name": "connection_problem",
@@ -474,7 +1130,7 @@
     },
     {
       "name": "description_connecting",
-      "value": "Setting up the system VPN. Please wait."
+      "value": "Setting up the system VPN. Please wait"
     },
     {
       "name": "description_login_required",
@@ -486,19 +1142,19 @@
     },
     {
       "name": "description_tls_problem",
-      "value": "Secure control-plane verification failed. Check the system time and network, then try again."
+      "value": "Secure control-plane verification failed. Check the system time and network, then try again"
     },
     {
       "name": "description_network_problem",
-      "value": "Tailscale could not reach the network. Check Wi-Fi or mobile data, then try again."
+      "value": "Tailscale could not reach the network. Check Wi-Fi or mobile data, then try again"
     },
     {
       "name": "description_vpn_permission_problem",
-      "value": "The system VPN could not start. Allow the VPN request and try connecting again."
+      "value": "The system VPN could not start. Allow the VPN request and try connecting again"
     },
     {
       "name": "description_vpn_conflict_problem",
-      "value": "Disconnect the other VPN in system settings, then try again."
+      "value": "Disconnect the other VPN in system settings, then try again"
     },
     {
       "name": "vpn_conflict_title",
@@ -506,7 +1162,7 @@
     },
     {
       "name": "vpn_conflict_message",
-      "value": "Disconnect other VPNs to connect Tailscale."
+      "value": "Disconnect other VPNs to connect Tailscale"
     },
     {
       "name": "vpn_conflict_confirm_action",
@@ -514,7 +1170,7 @@
     },
     {
       "name": "description_status_problem",
-      "value": "The VPN status is temporarily unavailable. Reopen the app and try again."
+      "value": "The VPN status is temporarily unavailable. Reopen the app and try again"
     },
     {
       "name": "description_disconnected",
@@ -586,7 +1242,7 @@
     },
     {
       "name": "exit_node_login_required",
-      "value": "Sign in to view and select exit nodes for this network."
+      "value": "Sign in to view and select exit nodes for this network"
     },
     {
       "name": "exit_node_disconnect_first",
@@ -646,7 +1302,7 @@
     },
     {
       "name": "device_copy_failed",
-      "value": "Copy failed. Try again."
+      "value": "Copy failed. Try again"
     },
     {
       "name": "device_approval_required",
@@ -670,11 +1326,11 @@
     },
     {
       "name": "account_signed_in",
-      "value": "This device is signed in to Tailscale."
+      "value": "This device is signed in to Tailscale"
     },
     {
       "name": "account_signed_out",
-      "value": "Sign in to manage this device and connect to your private network."
+      "value": "Sign in to manage this device and connect to your private network"
     },
     {
       "name": "account_profile_unavailable",
@@ -722,11 +1378,11 @@
     },
     {
       "name": "logout_description",
-      "value": "After signing out, this device must sign in again before connecting."
+      "value": "After signing out, this device must sign in again before connecting"
     },
     {
       "name": "logout_disconnect_first",
-      "value": "Disconnect Tailscale before signing out."
+      "value": "Disconnect Tailscale before signing out"
     },
     {
       "name": "logout_action",
@@ -734,7 +1390,7 @@
     },
     {
       "name": "logout_failed",
-      "value": "Sign-out failed. Try again later."
+      "value": "Sign-out failed. Try again later"
     },
     {
       "name": "logout_confirm_title",
@@ -742,7 +1398,7 @@
     },
     {
       "name": "logout_confirm_message",
-      "value": "This device will leave the current Tailscale network. You will need to sign in again to use it later."
+      "value": "This device will leave the current Tailscale network. You will need to sign in again to use it later"
     },
     {
       "name": "cancel_action",
@@ -778,7 +1434,7 @@
     },
     {
       "name": "diagnostic_report_description",
-      "value": "Creates a privacy-redacted ZIP with the device model, versions, status summaries, counts, settings, and recent structured events. Raw logs and identity or network details are excluded."
+      "value": "Creates a privacy-redacted ZIP with the device model, versions, status summaries, counts, settings, and recent structured events. Raw logs and identity or network details are excluded"
     },
     {
       "name": "diagnostic_report_action",
@@ -790,7 +1446,7 @@
     },
     {
       "name": "diagnostic_report_failed",
-      "value": "Failed to generate or share the diagnostic report."
+      "value": "Failed to generate or share the diagnostic report"
     },
     {
       "name": "settings_subtitle",
@@ -826,11 +1482,11 @@
     },
     {
       "name": "network_settings_disconnect_first",
-      "value": "Disconnect before changing network settings."
+      "value": "Disconnect before changing network settings"
     },
     {
       "name": "network_setting_failed",
-      "value": "The setting could not be saved. Try again."
+      "value": "The setting could not be saved. Try again"
     },
     {
       "name": "setting_enabled",
@@ -850,7 +1506,7 @@
     },
     {
       "name": "control_server_description",
-      "value": "Enter a backend server address to continue. If you are unsure what this is, use the default address. The app stays offline until you confirm."
+      "value": "Enter a backend server address to continue. If you are unsure what this is, use the default address. The app stays offline until you confirm"
     },
     {
       "name": "control_server_confirmed",
@@ -870,7 +1526,7 @@
     },
     {
       "name": "control_server_http_risk_message",
-      "value": "This address uses unencrypted HTTP. Sign-in and connection traffic may be exposed or changed by the network. Save it only if you trust this network and server."
+      "value": "This address uses unencrypted HTTP. Sign-in and connection traffic may be exposed or changed by the network. Save it only if you trust this network and server"
     },
     {
       "name": "control_server_http_risk_cancel",
@@ -882,19 +1538,19 @@
     },
     {
       "name": "control_server_saved",
-      "value": "Backend server saved. You can now sign in."
+      "value": "Backend server saved. You can now sign in"
     },
     {
       "name": "control_server_invalid",
-      "value": "Enter a valid HTTP or HTTPS control server URL without query parameters."
+      "value": "Enter a valid HTTP or HTTPS control server URL without query parameters"
     },
     {
       "name": "control_server_save_failed",
-      "value": "The control server could not be saved. Try again."
+      "value": "The control server could not be saved. Try again"
     },
     {
       "name": "control_server_disconnect_first",
-      "value": "Disconnect before changing the backend server."
+      "value": "Disconnect before changing the backend server"
     },
     {
       "name": "control_server_guide_title",
@@ -902,7 +1558,7 @@
     },
     {
       "name": "control_server_guide_message",
-      "value": "Tailscale OHOS will not connect to any server until you confirm an address. The official Tailscale server is prefilled, or you can enter your self-hosted Headscale address in Settings."
+      "value": "Tailscale OHOS will not connect to any server until you confirm an address. The official Tailscale server is prefilled, or you can enter your self-hosted Headscale address in Settings"
     },
     {
       "name": "control_server_later",
@@ -914,7 +1570,7 @@
     },
     {
       "name": "control_server_required_to_connect",
-      "value": "Confirm a backend server in Account settings first."
+      "value": "Confirm a backend server in Account settings first"
     },
     {
       "name": "connection_server_required",
@@ -922,7 +1578,7 @@
     },
     {
       "name": "description_server_required",
-      "value": "Choose and confirm a backend server before Tailscale starts."
+      "value": "Choose and confirm a backend server before Tailscale starts"
     },
     {
       "name": "control_server_first_run_tip",
@@ -930,7 +1586,7 @@
     },
     {
       "name": "diagnostic_first_run_tools_description",
-      "value": "Engineering actions for testing first-run setup and unexpected system VPN disconnection. Each action is recorded in the diagnostic event log."
+      "value": "Engineering actions for testing first-run setup and unexpected system VPN disconnection. Each action is recorded in the diagnostic event log"
     },
     {
       "name": "diagnostic_reset_first_run_action",
@@ -942,7 +1598,7 @@
     },
     {
       "name": "diagnostic_reset_first_run_confirm_message",
-      "value": "This removes the confirmed backend server and local Tailscale account state, then returns to the first-run guide."
+      "value": "This removes the confirmed backend server and local Tailscale account state, then returns to the first-run guide"
     },
     {
       "name": "diagnostic_reset_first_run_completed",
@@ -974,7 +1630,7 @@
     },
     {
       "name": "diagnostic_simulate_crash_confirm_message",
-      "value": "This engineering test stops the system VPN, leaves behind a fresh connected-state snapshot, and then terminates the app abnormally. After reopening, the app should verify the stale snapshot briefly and show Disconnected within about 2.5 seconds."
+      "value": "This engineering test stops the system VPN, leaves behind a fresh connected-state snapshot, and then terminates the app abnormally. After reopening, the app should verify the stale snapshot briefly and show Disconnected within about 2.5 seconds"
     },
     {
       "name": "diagnostic_simulate_crash_failed",
@@ -990,7 +1646,7 @@
     },
     {
       "name": "diagnostic_probe_description",
-      "value": "Check application and control-plane status without changing data."
+      "value": "Check application and control-plane status without changing data"
     },
     {
       "name": "diagnostic_refresh_status_action",
@@ -1018,7 +1674,7 @@
     },
     {
       "name": "diagnostic_dangerous_description",
-      "value": "These operations can clear data, stop services, or simulate failures."
+      "value": "These operations can clear data, stop services, or simulate failures"
     },
     {
       "name": "diagnostic_fake_media_online_title",
@@ -1026,7 +1682,7 @@
     },
     {
       "name": "diagnostic_fake_media_online_description",
-      "value": "Temporarily reports Jellyfin as available for this app launch."
+      "value": "Temporarily reports Jellyfin as available for this app launch"
     },
     {
       "name": "diagnostic_media_integration_title",
@@ -1034,7 +1690,7 @@
     },
     {
       "name": "diagnostic_media_integration_description",
-      "value": "Use built-in samples to verify Jellyfin, Emby, Plex, and HosPlayer integration."
+      "value": "Use built-in samples to verify Jellyfin, Emby, Plex, and HosPlayer integration"
     },
     {
       "name": "diagnostic_media_self_test_action",
@@ -1042,7 +1698,7 @@
     },
     {
       "name": "diagnostic_hosplayer_copy_action",
-      "value": "Copy HosPlayer parameter prototype"
+      "value": "Copy HosPlayer import link"
     },
     {
       "name": "diagnostic_media_self_test_status",
@@ -1051,6 +1707,30 @@
     {
       "name": "settings_appearance_title",
       "value": "Appearance"
+    },
+    {
+      "name": "settings_network_connection_title",
+      "value": "Network & connection"
+    },
+    {
+      "name": "settings_network_preferences_title",
+      "value": "Connection preferences"
+    },
+    {
+      "name": "settings_appearance_navigation_title",
+      "value": "Appearance & navigation"
+    },
+    {
+      "name": "settings_storage_cache_title",
+      "value": "Storage & cache"
+    },
+    {
+      "name": "settings_about_help_title",
+      "value": "About & help"
+    },
+    {
+      "name": "settings_animation_summary",
+      "value": "Duration, motion and spring response"
     },
     {
       "name": "settings_storage_title",
@@ -1082,11 +1762,11 @@
     },
     {
       "name": "settings_clear_cache_confirm_message",
-      "value": "This removes temporary files and pending received files. Your account, connection settings, and transfer history are not affected."
+      "value": "This removes temporary files and pending received files. Your account, connection settings, and transfer history are not affected"
     },
     {
       "name": "settings_clear_cache_busy",
-      "value": "A task is using the cache. Try again shortly."
+      "value": "A task is using the cache. Try again shortly"
     },
     {
       "name": "settings_cache_cleared",
@@ -1094,7 +1774,7 @@
     },
     {
       "name": "settings_clear_cache_failed",
-      "value": "Some cached files could not be removed. Try again later."
+      "value": "Some cached files could not be removed. Try again later"
     },
     {
       "name": "notification_taildrop_receiving_title",
@@ -1137,12 +1817,32 @@
       "value": "Connection path"
     },
     {
+      "name": "localsend_label",
+      "value": "MeshSend"
+    },
+    {
+      "name": "localsend_available",
+      "value": "Available"
+    },
+    {
+      "name": "localsend_checking",
+      "value": "Checking LocalSend"
+    },
+    {
+      "name": "localsend_unavailable",
+      "value": "LocalSend not found"
+    },
+    {
       "name": "device_probe_checking",
       "value": "Checking"
     },
     {
       "name": "device_path_direct",
       "value": "Direct · %d ms"
+    },
+    {
+      "name": "device_path_relay",
+      "value": "Relay · %d ms"
     },
     {
       "name": "device_path_peer_relay",
@@ -1159,6 +1859,22 @@
     {
       "name": "device_status_unknown",
       "value": "Not confirmed"
+    },
+    {
+      "name": "device_detail_service_unavailable",
+      "value": "Unavailable"
+    },
+    {
+      "name": "device_detail_service_available",
+      "value": "Available"
+    },
+    {
+      "name": "device_detail_device_offline",
+      "value": "Device offline"
+    },
+    {
+      "name": "device_detail_media_discovered",
+      "value": "Found: %s"
     },
     {
       "name": "streaming_label",
@@ -1207,6 +1923,410 @@
     {
       "name": "media_services_failed",
       "value": "Check failed"
+    },
+    {
+      "name": "device_group_local",
+      "value": "This device"
+    },
+    {
+      "name": "device_group_online",
+      "value": "Online"
+    },
+    {
+      "name": "device_group_offline",
+      "value": "Offline"
+    },
+    {
+      "name": "device_detail_services_title",
+      "value": "Available services"
+    },
+    {
+      "name": "device_detail_refresh_services",
+      "value": "Check available services again"
+    },
+    {
+      "name": "device_detail_desktop_title",
+      "value": "Desktop"
+    },
+    {
+      "name": "device_detail_desktop_description",
+      "value": "Sunshine · Open with Moonlight"
+    },
+    {
+      "name": "device_detail_remote_desktop_title",
+      "value": "Remote desktop"
+    },
+    {
+      "name": "device_detail_media_title",
+      "value": "Media"
+    },
+    {
+      "name": "device_detail_transfer_title",
+      "value": "Send files"
+    },
+    {
+      "name": "device_detail_remote_files_title",
+      "value": "Remote file management"
+    },
+    {
+      "name": "device_detail_transfer_tailsend_description",
+      "value": "MeshSend · built-in Tailscale transfer"
+    },
+    {
+      "name": "device_detail_transfer_localsend_description",
+      "value": "MeshSend · LocalSend extension"
+    },
+    {
+      "name": "device_detail_transfer_both_description",
+      "value": "Choose a MeshSend transfer method"
+    },
+    {
+      "name": "device_detail_localsend_description",
+      "value": "MeshSend is available on this device (LocalSend service)"
+    },
+    {
+      "name": "device_detail_taildrop_description",
+      "value": "Send files, media, or text with MeshSend"
+    },
+    {
+      "name": "device_detail_taildrop_offline",
+      "value": "MeshSend is available when this device is online"
+    },
+    {
+      "name": "device_detail_taildrop_connect",
+      "value": "Connect Tailscale to start a MeshSend transfer"
+    },
+    {
+      "name": "device_detail_services_checking",
+      "value": "Checking available services…"
+    },
+    {
+      "name": "device_detail_services_empty",
+      "value": "No services that can be opened directly were found"
+    },
+    {
+      "name": "device_detail_services_offline",
+      "value": "This device is offline. Its network details remain available below"
+    },
+    {
+      "name": "device_detail_network_title",
+      "value": "Network"
+    },
+    {
+      "name": "device_detail_exit_node_available",
+      "value": "Available"
+    },
+    {
+      "name": "device_detail_device_title",
+      "value": "Device information"
+    },
+    {
+      "name": "device_detail_system_label",
+      "value": "System"
+    },
+    {
+      "name": "device_detail_model_label",
+      "value": "Model"
+    },
+    {
+      "name": "network_sheet_title",
+      "value": "Network"
+    },
+    {
+      "name": "network_sheet_network_title",
+      "value": "Tailscale network"
+    },
+    {
+      "name": "network_sheet_device_label",
+      "value": "This device"
+    },
+    {
+      "name": "network_sheet_local_address",
+      "value": "Device IP"
+    },
+    {
+      "name": "network_sheet_not_used",
+      "value": "Not used"
+    },
+    {
+      "name": "network_sheet_not_used_available",
+      "value": "Not used · %d available"
+    },
+    {
+      "name": "network_sheet_tailnet_default",
+      "value": "Tailnet default"
+    },
+    {
+      "name": "network_sheet_lan_access",
+      "value": "LAN access"
+    },
+    {
+      "name": "network_sheet_on",
+      "value": "On"
+    },
+    {
+      "name": "network_sheet_off",
+      "value": "Off"
+    },
+    {
+      "name": "network_sheet_traffic_title",
+      "value": "Traffic"
+    },
+    {
+      "name": "network_sheet_duration",
+      "value": "Connected for"
+    },
+    {
+      "name": "network_sheet_current_rate",
+      "value": "Current rate"
+    },
+    {
+      "name": "network_sheet_session_traffic",
+      "value": "This connection"
+    },
+    {
+      "name": "update_changelog_title",
+      "value": "What's new"
+    },
+    {
+      "name": "update_changelog_dont_show",
+      "value": "Don't show again"
+    },
+    {
+      "name": "update_changelog_section",
+      "value": "What's new in this release"
+    },
+    {
+      "name": "navigation_settings_title",
+      "value": "Navigation bar"
+    },
+    {
+      "name": "navigation_settings_description",
+      "value": "Choose which tabs are visible and change their order"
+    },
+    {
+      "name": "navigation_position_title",
+      "value": "Navigation bar position"
+    },
+    {
+      "name": "navigation_position_description",
+      "value": "Drag vertically to move the floating bar up or down"
+    },
+    {
+      "name": "navigation_always_one_visible",
+      "value": "Keep at least one tab visible"
+    },
+    {
+      "name": "navigation_move_up",
+      "value": "Move tab up"
+    },
+    {
+      "name": "navigation_move_down",
+      "value": "Move tab down"
+    },
+    {
+      "name": "native_settings_title",
+      "value": "Settings"
+    },
+    {
+      "name": "native_settings_profile_default",
+      "value": "MeshArc"
+    },
+    {
+      "name": "native_settings_vip",
+      "value": "MeshArc VIP"
+    },
+    {
+      "name": "native_settings_vip_action",
+      "value": "Unlock more"
+    },
+    {
+      "name": "native_settings_system_follow",
+      "value": "Follow system"
+    },
+    {
+      "name": "native_settings_transfer_section",
+      "value": "Transfer & space"
+    },
+    {
+      "name": "native_settings_appearance_section",
+      "value": "Appearance & personalization"
+    },
+    {
+      "name": "native_settings_help_section",
+      "value": "About & help"
+    },
+    {
+      "name": "native_settings_transfer",
+      "value": "Transfer settings"
+    },
+    {
+      "name": "native_settings_storage",
+      "value": "Storage management"
+    },
+    {
+      "name": "native_settings_storage_total",
+      "value": "Total storage used"
+    },
+    {
+      "name": "native_settings_storage_app_data",
+      "value": "App configuration & data"
+    },
+    {
+      "name": "native_settings_storage_received",
+      "value": "Received files & media"
+    },
+    {
+      "name": "native_settings_storage_temporary",
+      "value": "Temporary transfer & preview cache"
+    },
+    {
+      "name": "native_settings_storage_clear",
+      "value": "Deep clean temporary cache and thumbnails"
+    },
+    {
+      "name": "native_settings_storage_clear_action",
+      "value": "Clean"
+    },
+    {
+      "name": "native_settings_theme",
+      "value": "Theme & style"
+    },
+    {
+      "name": "native_settings_color_mode",
+      "value": "Color mode"
+    },
+    {
+      "name": "native_settings_background_material",
+      "value": "Background & material"
+    },
+    {
+      "name": "native_settings_animation",
+      "value": "Animation effects"
+    },
+    {
+      "name": "native_settings_usage",
+      "value": "Usage guide"
+    },
+    {
+      "name": "native_settings_choose_background",
+      "value": "Choose background image"
+    },
+    {
+      "name": "native_settings_clear_background",
+      "value": "Clear background image"
+    },
+    {
+      "name": "native_settings_choose_background_desc",
+      "value": "Select an image from Photos"
+    },
+    {
+      "name": "native_settings_immersive_color",
+      "value": "Immersive color background"
+    },
+    {
+      "name": "native_settings_immersive_color_desc",
+      "value": "Tint the background by connection and transfer state for ambient status feedback"
+    },
+    {
+      "name": "native_settings_immersive_light",
+      "value": "Immersive light"
+    },
+    {
+      "name": "native_settings_immersive_light_desc",
+      "value": "Use HarmonyOS Design material lighting; power use and frame cost may increase"
+    },
+    {
+      "name": "native_settings_material",
+      "value": "Immersive material"
+    },
+    {
+      "name": "native_settings_material_desc",
+      "value": "Higher quality gives finer detail; Adaptive balances quality and power by device"
+    },
+    {
+      "name": "native_settings_material_adaptive",
+      "value": "Adaptive"
+    },
+    {
+      "name": "native_settings_material_exquisite",
+      "value": "Exquisite"
+    },
+    {
+      "name": "native_settings_material_gentle",
+      "value": "Gentle"
+    },
+    {
+      "name": "native_settings_material_smooth",
+      "value": "Smooth"
+    },
+    {
+      "name": "native_settings_brightness",
+      "value": "Material brightness"
+    },
+    {
+      "name": "native_settings_intelligent_material",
+      "value": "Intelligent material balance"
+    },
+    {
+      "name": "native_settings_intelligent_material_desc",
+      "value": "Adjust visual effects by device temperature to balance smoothness and experience"
+    },
+    {
+      "name": "native_settings_hdr",
+      "value": "Global HDR effect"
+    },
+    {
+      "name": "native_settings_hdr_desc",
+      "value": "Render lighting effects in HDR where supported; brightness and power use may increase"
+    },
+    {
+      "name": "native_settings_floating_tabs",
+      "value": "Floating tab bar"
+    },
+    {
+      "name": "native_settings_floating_tabs_desc",
+      "value": "Let the tab bar fill the bottom of the window"
+    },
+    {
+      "name": "native_settings_animation_duration",
+      "value": "Animation duration"
+    },
+    {
+      "name": "native_settings_animation_amplitude",
+      "value": "Animation movement"
+    },
+    {
+      "name": "native_settings_animation_damping",
+      "value": "Animation spring damping"
+    },
+    {
+      "name": "native_settings_preset_efficiency",
+      "value": "Efficiency"
+    },
+    {
+      "name": "native_settings_preset_default",
+      "value": "Default"
+    },
+    {
+      "name": "native_settings_preset_lively",
+      "value": "Lively"
+    },
+    {
+      "name": "native_settings_preview_hint",
+      "value": "Tap the preview to play the property animation"
+    },
+    {
+      "name": "native_settings_close",
+      "value": "Close settings"
+    },
+    {
+      "name": "native_settings_back",
+      "value": "Back"
+    },
+    {
+      "name": "transfer_multi_protocol_subtitle",
+      "value": "Send and receive files over multiple protocols"
     }
   ]
 }

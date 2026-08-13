@@ -1,0 +1,9 @@
+{
+  "requestFields": ["requestId", "action", "name", "inboxRoot", "path"],
+  "actions": ["stage", "delete", "clear"],
+  "gatewayMethods": ["parseNotificationAction", "claimNotificationAction", "createStageRequest", "createDeleteRequest", "claimRemoteDelete", "matchesResponse"],
+  "notificationTokens": ["handleTaildropNotificationWant", "taildropNotificationAction", "taildropNotificationFileName", "taildropNotificationFileSize"],
+  "orderingTokens": ["handleTaildropStagedFile", "requestTaildropReceiveDelete", "export_failed", "deleting"],
+  "idempotencyTokens": ["taildropPendingDeletes", "persistTaildropInbox", "submitNextTaildropPendingDelete", "claimRemoteDelete"],
+  "nonGoalTokens": ["taildropMediaPreviews", "taildropCachedFiles", "taildropHistory"]
+}

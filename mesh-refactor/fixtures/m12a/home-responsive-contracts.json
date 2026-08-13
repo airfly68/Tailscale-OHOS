@@ -1,0 +1,42 @@
+{
+  "adoptedWidthBreakpoints": [600, 840],
+  "cases": [
+    { "name": "compact-portrait-below-600", "width": 599, "height": 1000, "widthClass": "compact", "navigation": "bottom", "content": "single-column" },
+    { "name": "medium-portrait-at-600", "width": 600, "height": 1000, "widthClass": "medium", "navigation": "bottom", "content": "single-column" },
+    { "name": "medium-landscape-at-600", "width": 600, "height": 599, "widthClass": "medium", "navigation": "side", "content": "single-column" },
+    { "name": "medium-square-below-840", "width": 839, "height": 839, "widthClass": "medium", "navigation": "side", "content": "single-column" },
+    { "name": "expanded-portrait-at-840", "width": 840, "height": 1200, "widthClass": "expanded", "navigation": "side", "content": "master-detail" },
+    { "name": "expanded-landscape-below-1440", "width": 1439, "height": 800, "widthClass": "expanded", "navigation": "side", "content": "master-detail" },
+    { "name": "candidate-xl-keeps-expanded", "width": 1440, "height": 900, "widthClass": "expanded", "navigation": "side", "content": "master-detail" },
+    { "name": "candidate-narrow-keeps-compact", "width": 320, "height": 640, "widthClass": "compact", "navigation": "bottom", "content": "single-column" }
+  ],
+  "requiredTokens": [
+    "homeNavigationMode",
+    "homeContentLayout",
+    "layoutHeight",
+    "onAreaChange",
+    "homePeerScroller",
+    "homePeerScrollAnchorIndex",
+    "onScrollIndex",
+    "scrollToIndex",
+    "selectedPeerKey",
+    "home-master-detail",
+    "home-single-column"
+  ],
+  "retainedContractTokens": [
+    "HomeReadOnlyGateway",
+    "peerDataSource",
+    "applyPeers",
+    "selectedPeerKey"
+  ],
+  "forbiddenStrategyTokens": [
+    "foldStatusChange",
+    "deviceTypes",
+    "tablet",
+    "2in1",
+    "320vp",
+    "1440vp",
+    "0.8",
+    "1.2"
+  ]
+}
