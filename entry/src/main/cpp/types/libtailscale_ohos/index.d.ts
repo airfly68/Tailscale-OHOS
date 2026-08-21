@@ -7,7 +7,6 @@ export const backendStop: () => string;
 export const backendLogout: () => string;
 export const backendStatus: () => string;
 export const backendSnapshot: () => Promise<string>;
-export const backendLocalSendRefreshAsync: () => Promise<string>;
 export const backendTaildropIncomingSnapshot: () => Promise<string>;
 export const backendStopAsync: () => Promise<string>;
 export const backendLogoutAsync: () => Promise<string>;

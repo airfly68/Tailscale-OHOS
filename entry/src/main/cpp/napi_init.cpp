@@ -420,13 +420,6 @@ napi_value BackendSnapshotAsync(napi_env env, napi_callback_info info)
     return CreateAsyncStringPromise(env, TSBackendSnapshot, "TailscaleBackendSnapshot");
 }
 
-napi_value BackendLocalSendRefreshAsync(napi_env env, napi_callback_info info)
-{
-    (void)info;
-    return CreateAsyncStringPromise(
-        env, TSBackendLocalSendRefresh, "TailscaleBackendLocalSendRefresh");
-}
-
 napi_value BackendTaildropIncomingSnapshotAsync(napi_env env, napi_callback_info info)
 {
     (void)info;
@@ -978,8 +971,6 @@ static napi_value Init(napi_env env, napi_value exports)
         {"backendLogout", nullptr, BackendLogout, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"backendStatus", nullptr, BackendStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"backendSnapshot", nullptr, BackendSnapshotAsync, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"backendLocalSendRefreshAsync", nullptr, BackendLocalSendRefreshAsync, nullptr, nullptr, nullptr,
-            napi_default, nullptr},
         {"backendTaildropIncomingSnapshot", nullptr, BackendTaildropIncomingSnapshotAsync,
             nullptr, nullptr, nullptr, napi_default, nullptr},
         {"backendStopAsync", nullptr, BackendStopAsync, nullptr, nullptr, nullptr, napi_default, nullptr},

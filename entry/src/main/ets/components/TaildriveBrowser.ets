@@ -52,7 +52,6 @@ interface TaildriveThumbnailModel {
 }
 
 const TAILDRIVE_AUTO_PREVIEW_LIMIT_BYTES: number = 5 * 1024 * 1024;
-const TAILDRIVE_REFRESH_INTERVAL_MS: number = 30000;
 
 class TaildriveListDataSource implements IDataSource {
   private data: TaildriveListItemModel[] = [];
@@ -92,7 +91,6 @@ export struct TaildriveBrowser {
   @Prop bottomInset: number = 0;
   @Prop titleBarPadding: number = 16;
   @Prop materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
-  @Prop transparentBackground: boolean = false;
   @Prop targetMachineName: string = '';
   @Prop @Watch('onTargetRequestChanged') targetRequestId: number = 0;
   @StorageLink('taildriveBackRequest') @Watch('onBackRequestChanged') backRequest: number = 0;
@@ -141,8 +139,6 @@ export struct TaildriveBrowser {
   private breadcrumbScroller: Scroller = new Scroller();
   private transferTimer: number = -1;
   private statusTimer: number = -1;
-  private refreshTimer: number = -1;
-  private refreshInFlight: boolean = false;
   private lastNotifiedProgress: number = -1;
   private retryKind: string = '';
   private retryDownloadEntry: TaildriveEntry | undefined = undefined;
@@ -169,12 +165,10 @@ export struct TaildriveBrowser {
     } else {
       this.refresh();
     }
-    this.startRefreshPolling();
   }
 
   aboutToDisappear(): void {
     this.stopTransferPolling();
-    this.stopRefreshPolling();
     this.clearStatusTimer();
     clearTaildriveProgress();
     AppStorage.setOrCreate('taildriveUiBackActive', false);
@@ -193,18 +187,14 @@ export struct TaildriveBrowser {
 
   private onConnectedChanged(): void {
     if (this.connected) {
-      this.startRefreshPolling();
       if (this.targetRequestId > 0 && this.targetMachineName.length > 0) {
         this.openTargetMachine();
       } else {
         this.refresh();
       }
     } else {
-      this.stopRefreshPolling();
       this.entries = [];
       this.loading = false;
-      this.searchVisible = false;
-      this.exitSelectionMode();
       this.reason = 'backend_unavailable';
       this.status = '';
     }
@@ -343,15 +333,12 @@ export struct TaildriveBrowser {
     return name;
   }
 
-  private async refresh(minimumIndicatorMs: number = 0, silent: boolean = false): Promise<void> {
-    if (!this.connected || this.refreshInFlight) {
+  private async refresh(minimumIndicatorMs: number = 0): Promise<void> {
+    if (!this.connected || this.loading) {
       return;
     }
     const startedAtMs: number = Date.now();
-    this.refreshInFlight = true;
-    if (!silent) {
-      this.loading = true;
-    }
+    this.loading = true;
     this.reason = '';
     try {
       const result: TaildriveListResult = await this.gateway.list(this.path);
@@ -379,10 +366,7 @@ export struct TaildriveBrowser {
       if (remainingIndicatorMs > 0) {
         await new Promise<void>((resolve: () => void) => setTimeout(resolve, remainingIndicatorMs));
       }
-      if (!silent) {
-        this.loading = false;
-      }
-      this.refreshInFlight = false;
+      this.loading = false;
     }
   }
 
@@ -1496,192 +1480,48 @@ export struct TaildriveBrowser {
     return index >= 0 ? name.substring(index + 1).toLowerCase() : '';
   }
 
-  private remotePathDepth(remotePath: string): number {
-    return remotePath.split('/').filter((segment: string) => segment.length > 0).length;
-  }
-
-  private isWindowsDriveDirectory(entry: TaildriveEntry): boolean {
-    const kind: string = entry.kind.trim().toLowerCase();
-    const contentType: string = (entry.contentType ?? '').trim().toLowerCase();
-    if (['drive', 'disk', 'volume', 'drive_root', 'disk_root', 'filesystem_root'].includes(kind) ||
-      ['application/x-drive', 'application/x-disk', 'inode/drive', 'inode/volume',
-        'inode/mount-point'].includes(contentType)) {
-      return true;
-    }
-    return /^[A-Za-z]:[\\/]?$/.test(entry.name.trim());
-  }
-
-  private specialFolderKind(name: string): string {
-    switch (name.trim().toLowerCase()) {
-      case '桌面':
-      case 'desktop': return 'desktop';
-      case '下载':
-      case 'download':
-      case 'downloads': return 'download';
-      case '文档':
-      case '文稿':
-      case 'document':
-      case 'documents':
-      case 'docs': return 'document';
-      case '图片':
-      case '照片':
-      case 'picture':
-      case 'pictures':
-      case 'photo':
-      case 'photos':
-      case 'image':
-      case 'images': return 'picture';
-      case '音乐':
-      case 'music':
-      case 'audio': return 'music';
-      case '视频':
-      case '影片':
-      case 'video':
-      case 'videos':
-      case 'movie':
-      case 'movies': return 'video';
-      default: return '';
-    }
-  }
-
-  private directoryIcon(entry: TaildriveEntry): Resource {
-    const depth: number = this.remotePathDepth(entry.path);
-    if (depth === 1) {
-      return $r('app.media.ic_user');
-    }
-    if (depth === 2) {
-      return $r('app.media.ic_network');
-    }
-    if (depth >= 3) {
-      if (this.isWindowsDriveDirectory(entry)) {
-        return $r('app.media.ic_disk_filled');
-      }
-      switch (this.specialFolderKind(entry.name)) {
-        case 'desktop': return $r('app.media.taildrive_folder_desktop');
-        case 'download': return $r('app.media.taildrive_folder_download');
-        case 'document': return $r('app.media.taildrive_folder_document');
-        case 'picture': return $r('app.media.taildrive_folder_picture');
-        case 'music': return $r('app.media.taildrive_folder_music');
-        case 'video': return $r('app.media.taildrive_folder_video');
-      }
-    }
-    return $r('app.media.taildrive_file_folder');
-  }
-
-  private fileIcon(entry: TaildriveEntry): Resource {
+  private fileSymbol(entry: TaildriveEntry): Resource {
     if (entry.kind === 'directory') {
-      return this.directoryIcon(entry);
+      return $r('sys.symbol.folder');
     }
     const extension: string = this.fileExtension(entry.name);
-    switch (extension) {
-      case '7z': return $r('app.media.ic_light_7z');
-      case 'amr': return $r('app.media.ic_light_amr');
-      case 'ape': return $r('app.media.ic_light_ape');
-      case 'app': return $r('app.media.ic_light_app');
-      case 'caj': return $r('app.media.ic_light_caj');
-      case 'ics':
-      case 'ical':
-      case 'calendar': return $r('app.media.ic_light_calendar');
-      case 'chm': return $r('app.media.ic_light_chm');
-      case 'connect':
-      case 'connection': return $r('app.media.ic_light_connect');
-      case 'crdownload':
-      case 'download':
-      case 'part':
-      case 'partial': return $r('app.media.ic_light_download');
-      case 'dwg': return $r('app.media.ic_light_dwg');
-      case 'dxf': return $r('app.media.ic_light_dxf');
-      case 'eddx': return $r('app.media.ic_light_eddx');
-      case 'eml':
-      case 'emlx':
-      case 'msg': return $r('app.media.ic_light_eml');
-      case 'emmx': return $r('app.media.ic_light_emmx');
-      case 'xls':
-      case 'xlsx':
-      case 'xlsm':
-      case 'xlsb':
-      case 'csv':
-      case 'et':
-      case 'ett':
-      case 'ods': return $r('app.media.ic_light_excel');
-      case 'exe':
-      case 'msi':
-      case 'com': return $r('app.media.ic_light_exe');
-      case 'flac': return $r('app.media.ic_light_flac');
-      case 'gz':
-      case 'gzip': return $r('app.media.ic_light_gz');
-      case 'hdoc': return $r('app.media.ic_light_hdoc');
-      case 'hinote': return $r('app.media.ic_light_hinote');
-      case 'htm': return $r('app.media.ic_light_htm');
-      case 'html':
-      case 'xhtml':
-      case 'mht':
-      case 'mhtml': return $r('app.media.ic_light_html');
-      case 'kdh': return $r('app.media.ic_light_kdh');
-      case 'log': return $r('app.media.ic_light_log');
-      case 'm4a': return $r('app.media.ic_light_m4a');
-      case 'mp3': return $r('app.media.ic_light_mp3');
-      case 'aac':
-      case 'midi':
-      case 'mid':
-      case 'ogg':
-      case 'opus': return $r('app.media.ic_light_music');
-      case 'nh': return $r('app.media.ic_light_nh');
-      case 'pdf': return $r('app.media.ic_light_pdf');
-      case 'ppt':
-      case 'pptx':
-      case 'pptm':
-      case 'pps':
-      case 'ppsx':
-      case 'dps':
-      case 'dpt':
-      case 'odp': return $r('app.media.ic_light_ppt');
-      case 'rar': return $r('app.media.ic_light_rar');
-      case 'tar': return $r('app.media.ic_light_tar');
-      case 'teb': return $r('app.media.ic_light_teb');
-      case 'txt': return $r('app.media.ic_light_txt');
-      case 'wav': return $r('app.media.ic_light_wav');
-      case 'wma': return $r('app.media.ic_light_wma');
-      case 'doc':
-      case 'docx':
-      case 'docm':
-      case 'dot':
-      case 'dotx':
-      case 'wps':
-      case 'wpt':
-      case 'odt':
-      case 'rtf': return $r('app.media.ic_light_word');
-      case 'xml':
-      case 'xsl':
-      case 'xslt': return $r('app.media.ic_light_xml');
-      case 'zip': return $r('app.media.ic_light_zip');
-      case 'bz2':
-      case 'xz':
-      case 'zst':
-      case 'lz':
-      case 'lz4':
-      case 'cab':
-      case 'iso':
-      case 'dmg': return $r('app.media.ic_light_zip_1');
-      case 'hap':
-      case 'hsp':
-      case 'har':
-      case 'apk':
-      case 'aab':
-      case 'ipa': return $r('app.media.ic_light_other_app');
-    }
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'].includes(extension)) {
-      return $r('app.media.ic_light_picture');
+      return $r('sys.symbol.picture');
     }
     if (['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', '3gp'].includes(extension)) {
-      return $r('app.media.ic_light_video');
+      return $r('sys.symbol.video');
     }
-    if (['md', 'markdown', 'json', 'jsonl', 'yaml', 'yml', 'ini', 'conf', 'cfg', 'properties', 'sql',
-      'ets', 'ts', 'tsx', 'js', 'jsx', 'java', 'kt', 'c', 'cc', 'cpp', 'h', 'hpp', 'go', 'rs', 'py',
-      'sh', 'bat', 'cmd', 'ps1'].includes(extension)) {
-      return $r('app.media.ic_light_text');
+    if (extension === 'pdf') {
+      return $r('sys.symbol.pdf_doc');
     }
-    return extension.length === 0 ? $r('app.media.ic_light_unknow') : $r('app.media.ic_light_other');
+    if (['txt', 'md', 'json', 'jsonl', 'csv', 'xml', 'yaml', 'yml', 'log'].includes(extension)) {
+      return $r('sys.symbol.doc_plaintext');
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(extension)) {
+      return $r('sys.symbol.doc_zipper');
+    }
+    if (['hap', 'hsp', 'har', 'app', 'apk'].includes(extension)) {
+      return $r('sys.symbol.archivebox');
+    }
+    return $r('sys.symbol.doc');
+  }
+
+  private fileIconColor(entry: TaildriveEntry): ResourceColor {
+    if (entry.kind === 'directory') {
+      return $r('app.color.transfer_file_icon_yellow');
+    }
+    const extension: string = this.fileExtension(entry.name);
+    if (extension === 'pdf' || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg',
+      'mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', '3gp'].includes(extension)) {
+      return $r('app.color.transfer_file_icon_red');
+    }
+    if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(extension)) {
+      return $r('app.color.transfer_file_icon_yellow');
+    }
+    if (['hap', 'hsp', 'har', 'app', 'apk'].includes(extension)) {
+      return $r('app.color.transfer_file_icon_neutral');
+    }
+    return $r('app.color.transfer_file_icon_blue');
   }
 
   private directoryKindText(entry: TaildriveEntry): ResourceStr {
@@ -2163,7 +2003,7 @@ export struct TaildriveBrowser {
           Column({ space: 8 }) {
             ForEach(this.moveDestinationEntries(), (entry: TaildriveEntry) => {
               Row({ space: 8 }) {
-                this.EntryIcon(entry, 18)
+                Text('📁').fontSize(18)
                 Text(entry.name)
                   .fontSize(13)
                   .fontColor($r('sys.color.font_primary'))
@@ -2181,10 +2021,6 @@ export struct TaildriveBrowser {
           .width('100%')
         }
         .height(220)
-        .nestedScroll({
-          scrollForward: NestedScrollMode.PARENT_FIRST,
-          scrollBackward: NestedScrollMode.SELF_FIRST
-        })
       }
       Row({ space: 10 }) {
         Text($r('app.string.cancel_action'))
@@ -2307,7 +2143,7 @@ export struct TaildriveBrowser {
           ForEach(this.displayEntries(), (entry: TaildriveEntry) => {
             Column({ space: 7 }) {
               Row({ space: 8 }) {
-                this.EntryIcon(entry, 18)
+                Text(entry.kind === 'directory' ? '📁' : '📄').fontSize(18)
                 Column({ space: 2 }) {
                   Text(entry.name)
                     .fontSize(13)
@@ -2408,29 +2244,31 @@ export struct TaildriveBrowser {
     .backgroundColor(this.standalone ? Color.Transparent : $r('app.color.surface_subtle'))
     .borderRadius(this.standalone ? 0 : 16)
     .id('taildrive-legacy-browser')
-  }
-
-  private startRefreshPolling(): void {
-    this.stopRefreshPolling();
-    this.refreshTimer = setInterval(() => {
-      if (!this.connected || this.loading || this.busy) {
-        return;
-      }
-      this.refresh(0, true);
-    }, TAILDRIVE_REFRESH_INTERVAL_MS);
-  }
-
-  private stopRefreshPolling(): void {
-    if (this.refreshTimer >= 0) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = -1;
-    }
+    .bindSheet($$this.editorVisible, this.EditorSheet(), {
+      height: '31%',
+      dragBar: true,
+      showClose: true
+    })
+    .bindSheet($$this.detailsVisible, this.DetailsSheet(), {
+      height: '48%',
+      dragBar: true,
+      showClose: true
+    })
+    .bindSheet($$this.moveVisible, this.MoveSheet(), {
+      height: '62%',
+      dragBar: true,
+      showClose: true
+    })
   }
 
   @Builder
   private EntryIcon(entry: TaildriveEntry, size: number) {
     Stack() {
-      if (entry.kind !== 'directory' && this.thumbnailUri(entry).length > 0) {
+      if (entry.kind === 'directory') {
+        SymbolGlyph($r('sys.symbol.folder'))
+          .fontSize(size * 0.82)
+          .fontColor([$r('app.color.transfer_file_icon_yellow')])
+      } else if (this.thumbnailUri(entry).length > 0) {
         Image(this.thumbnailUri(entry))
           .width(size)
           .height(size)
@@ -2438,10 +2276,16 @@ export struct TaildriveBrowser {
           .borderRadius(12)
           .clip(true)
       } else {
-        Image(this.fileIcon(entry))
-          .width(size)
-          .height(size)
-          .objectFit(ImageFit.Contain)
+        Row() {
+          SymbolGlyph(this.fileSymbol(entry))
+            .fontSize(size * 0.58)
+            .fontColor([this.fileIconColor(entry)])
+        }
+        .width(size)
+        .height(size)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor($r('app.color.surface_subtle'))
+        .borderRadius(12)
       }
     }
     .width(size)
@@ -2921,97 +2765,7 @@ export struct TaildriveBrowser {
     .width('100%')
     .height('100%')
     .scrollBar(BarState.Auto)
-    .nestedScroll({
-      scrollForward: NestedScrollMode.PARENT_FIRST,
-      scrollBackward: NestedScrollMode.SELF_FIRST
-    })
     .id('taildrive-sort-panel')
-  }
-
-  @Builder
-  private SheetHosts() {
-    Stack() {
-      Row()
-        .width(0)
-        .height(0)
-        .id('taildrive-editor-sheet-host')
-        .bindSheet($$this.editorVisible, this.EditorSheet(), {
-          height: '31%',
-          preferType: SheetType.BOTTOM,
-          mode: SheetMode.OVERLAY,
-          dragBar: true,
-          showClose: true,
-          enableOutsideInteractive: false,
-          onDisappear: () => {
-            this.editorVisible = false;
-          }
-        })
-      Row()
-        .width(0)
-        .height(0)
-        .id('taildrive-details-sheet-host')
-        .bindSheet($$this.detailsVisible, this.DetailsSheet(), {
-          height: '60%',
-          preferType: SheetType.BOTTOM,
-          mode: SheetMode.OVERLAY,
-          dragBar: true,
-          showClose: true,
-          enableOutsideInteractive: false,
-          onDisappear: () => {
-            this.detailsVisible = false;
-          }
-        })
-      Row()
-        .width(0)
-        .height(0)
-        .id('taildrive-preview-download-sheet-host')
-        .bindSheet($$this.previewDownloadVisible, this.PreviewDownloadSheet(), {
-          height: '38%',
-          preferType: SheetType.BOTTOM,
-          mode: SheetMode.OVERLAY,
-          dragBar: true,
-          showClose: true,
-          enableOutsideInteractive: false,
-          onDisappear: () => {
-            this.previewDownloadVisible = false;
-          }
-        })
-      Row()
-        .width(0)
-        .height(0)
-        .id('taildrive-move-sheet-host')
-        .bindSheet($$this.moveVisible, this.MoveSheet(), {
-          height: '62%',
-          preferType: SheetType.BOTTOM,
-          mode: SheetMode.OVERLAY,
-          dragBar: true,
-          showClose: true,
-          enableOutsideInteractive: false,
-          onDisappear: () => {
-            this.moveVisible = false;
-          }
-        })
-      Row()
-        .width(0)
-        .height(0)
-        .id('taildrive-sort-sheet-host')
-        .bindSheet($$this.sortSheetVisible, this.SortSheet(), {
-          detents: ['58%', '72%'],
-          preferType: SheetType.BOTTOM,
-          mode: SheetMode.OVERLAY,
-          scrollSizeMode: ScrollSizeMode.CONTINUOUS,
-          dragBar: true,
-          showClose: true,
-          enableOutsideInteractive: false,
-          title: { title: $r('app.string.taildrive_sort_group_title') },
-          onDisappear: () => {
-            this.sortSheetVisible = false;
-          }
-        })
-    }
-    .width(0)
-    .height(0)
-    .id('taildrive-sheet-hosts')
   }
 
   @Builder
@@ -3463,8 +3217,7 @@ export struct TaildriveBrowser {
         blurStrategy: BlurStrategy.DISABLE,
         originalStyle: {
           backgroundStyle: {
-            backgroundColor: this.transparentBackground ? Color.Transparent :
-              $r('sys.color.background_secondary')
+            backgroundColor: $r('sys.color.background_secondary')
           },
           contentStyle: {
             titleStyle: {
@@ -3486,7 +3239,7 @@ export struct TaildriveBrowser {
         },
         menu: {
           maxCount: 2,
-          value: !this.connected || this.searchVisible || this.selectionMode ? [] : [
+          value: this.searchVisible || this.selectionMode ? [] : [
             {
               content: {
                 label: $r('app.string.taildrive_multi_select_action'),
@@ -3518,8 +3271,7 @@ export struct TaildriveBrowser {
     .width('100%')
     .height('100%')
     .id('hds-navigation-files')
-    .backgroundColor(this.transparentBackground ? Color.Transparent :
-      $r('sys.color.background_secondary'))
+    .backgroundColor($r('sys.color.background_secondary'))
   }
 
   @Builder
@@ -3649,18 +3401,58 @@ export struct TaildriveBrowser {
         if (this.folderDialogVisible) {
           this.FolderDialog()
         }
-        this.SheetHosts()
       }
       .width('100%')
       .height('100%')
+      .bindSheet($$this.editorVisible, this.EditorSheet(), {
+        height: '31%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.detailsVisible, this.DetailsSheet(), {
+        height: '60%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.previewDownloadVisible, this.PreviewDownloadSheet(), {
+        height: '38%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.moveVisible, this.MoveSheet(), {
+        height: '62%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.sortSheetVisible, this.SortSheet(), {
+        height: '66%',
+        detents: ['58%', '72%'],
+        preferType: SheetType.BOTTOM,
+        scrollSizeMode: ScrollSizeMode.CONTINUOUS,
+        dragBar: true,
+        showClose: true,
+        title: { title: $r('app.string.taildrive_sort_group_title') }
+      })
     } else {
       Column() {
         this.BrowserContent()
-        this.SheetHosts()
       }
       .width('100%')
       .backgroundColor($r('app.color.surface_subtle'))
       .borderRadius(16)
+      .bindSheet($$this.editorVisible, this.EditorSheet(), {
+        height: '31%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.detailsVisible, this.DetailsSheet(), {
+        height: '60%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.previewDownloadVisible, this.PreviewDownloadSheet(), {
+        height: '38%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.moveVisible, this.MoveSheet(), {
+        height: '62%', dragBar: true, showClose: true
+      })
+      .bindSheet($$this.sortSheetVisible, this.SortSheet(), {
+        height: '66%',
+        detents: ['58%', '72%'],
+        preferType: SheetType.BOTTOM,
+        scrollSizeMode: ScrollSizeMode.CONTINUOUS,
+        dragBar: true,
+        showClose: true,
+        title: { title: $r('app.string.taildrive_sort_group_title') }
+      })
     }
   }
 }

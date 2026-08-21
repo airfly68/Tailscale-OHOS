@@ -18,17 +18,14 @@ export struct NativeSettingsNavigation {
   @Prop storageTemporaryBytes: number = 0;
   @Prop storageClearEnabled: boolean = false;
   @Prop backgroundPickerInProgress: boolean = false;
-  @Prop backgroundClearEnabled: boolean = false;
-  @Prop immersiveColorEnabled: boolean = false;
-  @Prop pageName: string = 'background';
   onGlowLevelChange: (level: number) => void = (_level: number) => {};
   onSelectBackground: () => void = () => {};
-  onClearBackground: () => void = () => {};
-  onImmersiveColorChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   onSelectTransfer: () => void = () => {};
   onClearTemporaryStorage: () => void = () => {};
   onDismiss: () => void = () => {};
 
+  @State immersiveColorEnabled: boolean = false;
+  @State immersiveLightEnabled: boolean = true;
   @State hdrEnabled: boolean = false;
   @State floatingTabsEnabled: boolean = false;
   @State materialBrightness: number = 52;
@@ -329,66 +326,38 @@ export struct NativeSettingsNavigation {
   }
 
   @Builder
-  private ProfileHero(): void {
-    Column({ space: 8 }) {
-      Image($r('app.media.app_icon'))
-        .width(84)
-        .height(84)
-        .borderRadius(42)
-        .objectFit(ImageFit.Cover)
-        .border({ width: 2, color: $r('sys.color.comp_background_primary'), radius: 42 })
-        .shadow({ radius: 14, color: '#33000000', offsetY: 5 })
-      Text(this.profileName.length > 0 ? this.profileName : $r('app.string.native_settings_profile_default'))
-        .fontSize(24)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('sys.color.font_primary'))
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
-        .textAlign(TextAlign.Center)
-      Button({ type: ButtonType.Normal, stateEffect: true }) {
-        Row({ space: 10 }) {
-          Text('✦')
-            .fontSize(25)
-            .fontColor($r('app.color.emphasize'))
-          Text($r('app.string.native_settings_vip'))
-            .fontSize(19)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('sys.color.font_primary'))
-            .layoutWeight(1)
-            .textAlign(TextAlign.Start)
-          Text($r('app.string.native_settings_vip_action'))
-            .fontSize(15)
-            .fontColor($r('sys.color.font_secondary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          SymbolGlyph($r('sys.symbol.chevron_right'))
-            .fontSize(18)
-            .fontColor([$r('sys.color.icon_secondary')])
-        }
-          .width('100%')
-          .height('100%')
-          .padding({ left: 18, right: 16 })
-      }
-        .width('100%')
-        .height(76)
-        .padding(0)
-        .backgroundColor($r('sys.color.comp_background_primary'))
-        .borderRadius(24)
-        .id('native-settings-vip')
-        .onClick(() => {})
-    }
-      .width('100%')
-      .padding({ left: 18, right: 18, top: 8, bottom: 8 })
-      .alignItems(HorizontalAlign.Center)
-  }
-
-  @Builder
   private SettingsHome(): void {
     Scroll() {
       Column({ space: 14 }) {
         this.TopBar($r('app.string.native_settings_title'), false)
-        this.ProfileHero()
+
+        Column({ space: 6 }) {
+          Row({ space: 12 }) {
+            Stack({ alignContent: Alignment.Center }) {
+              Text(this.profileName.length > 0 ? this.profileName.substring(0, 1).toUpperCase() : 'M')
+                .fontSize(24)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.emphasize'))
+            }
+              .width(72)
+              .height(72)
+              .borderRadius(36)
+              .backgroundColor($r('sys.color.comp_background_tertiary'))
+            Column({ space: 2 }) {
+              Text(this.profileName.length > 0 ? this.profileName : 'MeshArc')
+                .fontSize(20)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('sys.color.font_primary'))
+              Text($r('app.string.app_tagline'))
+                .fontSize(12)
+                .fontColor($r('sys.color.font_secondary'))
+            }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+          }
+            .width('100%')
+            .padding({ left: 18, right: 18, top: 6, bottom: 12 })
+        }
 
         this.SectionTitle($r('app.string.native_settings_transfer_section'))
         Column({ space: 2 }) {
@@ -411,7 +380,7 @@ export struct NativeSettingsNavigation {
             '', '', () => {}, 'native-settings-theme')
           Divider().color($r('sys.color.comp_divider')).margin({ left: 54, right: 16 })
           this.SettingsRow($r('sys.symbol.eye'), $r('app.string.native_settings_color_mode'),
-            '', $r('app.string.native_settings_system_follow'), () => {},
+            '', $r('app.string.native_settings_material_adaptive'), () => {},
             'native-settings-color-mode')
           Divider().color($r('sys.color.comp_divider')).margin({ left: 54, right: 16 })
           this.SettingsRow($r('sys.symbol.picture'),
@@ -447,10 +416,6 @@ export struct NativeSettingsNavigation {
       .backgroundColor($r('sys.color.background_secondary'))
       .edgeEffect(EdgeEffect.Spring)
       .scrollBar(BarState.Auto)
-      .nestedScroll({
-        scrollForward: NestedScrollMode.PARENT_FIRST,
-        scrollBackward: NestedScrollMode.SELF_FIRST
-      })
   }
 
   @Builder
@@ -506,12 +471,18 @@ export struct NativeSettingsNavigation {
   @Builder
   private BackgroundPreviewCard(): void {
     Stack({ alignContent: Alignment.Center }) {
-      if (this.backgroundImageUri.length > 0) {
-        Image(this.backgroundImageUri)
-          .width('100%')
-          .height('100%')
-          .objectFit(ImageFit.Cover)
-      } else {
+        if (this.backgroundImageUri.length > 0) {
+          Image(this.backgroundImageUri)
+            .width('100%')
+            .height('100%')
+            .objectFit(ImageFit.Cover)
+            .opacity(0.18)
+        } else {
+          Row()
+            .width('100%')
+            .height('100%')
+            .backgroundColor('#F0F1F5')
+        }
         Row()
           .width(278)
           .height(278)
@@ -523,16 +494,50 @@ export struct NativeSettingsNavigation {
           .borderRadius(98)
           .backgroundColor('#A9A3BF')
           .opacity(0.8)
-        Row()
+        Stack() {
+          if (this.backgroundImageUri.length > 0) {
+            Image(this.backgroundImageUri)
+              .width(100)
+              .height(100)
+              .borderRadius(50)
+              .objectFit(ImageFit.Cover)
+          } else {
+            Row()
+              .width(100)
+              .height(100)
+              .borderRadius(50)
+              .backgroundColor($r('app.color.emphasize'))
+          }
+        }
           .width(112)
           .height(112)
+          .padding(6)
           .borderRadius(56)
-          .backgroundColor($r('app.color.emphasize'))
+          .backgroundColor('#F7F6FA')
           .shadow({ radius: 18, color: '#55000000', offsetY: 7 })
-      }
+          .scale({
+            x: this.previewActive ? 1.06 : 1,
+            y: this.previewActive ? 1.06 : 1
+          })
+        Button({ type: ButtonType.Circle, stateEffect: true }) {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(28)
+            .fontColor([$r('app.color.emphasize')])
+        }
+          .width(62)
+          .height(62)
+          .padding(0)
+          .backgroundColor('#66F7F8FC')
+          .border({ width: 1, color: '#99FFFFFF', radius: 31 })
+          .align(Alignment.BottomEnd)
+          .margin({ right: 18, bottom: 16 })
+          .onClick(() => this.togglePreview())
     }
+      .width('100%')
+      .height('100%')
       .borderRadius(24)
       .clip(true)
+      .onClick(() => this.togglePreview())
       .width('100%')
       .height(260)
       .backgroundColor(Color.Transparent)
@@ -586,7 +591,7 @@ export struct NativeSettingsNavigation {
   @Builder
   private BackgroundPage(): void {
     Column() {
-      this.TopBar($r('app.string.native_settings_background_material'), false)
+      this.TopBar($r('app.string.native_settings_background_material'), true)
       Scroll() {
         Column({ space: 14 }) {
           this.BackgroundPreviewCard()
@@ -618,36 +623,14 @@ export struct NativeSettingsNavigation {
             .id('native-settings-choose-background')
             .onClick(() => this.onSelectBackground())
 
-          Button({ type: ButtonType.Normal, stateEffect: true }) {
-            Row({ space: 12 }) {
-              SymbolGlyph($r('sys.symbol.trash'))
-                .fontSize(21)
-                .fontColor([$r('app.color.status_error')])
-              Text($r('app.string.native_settings_clear_background'))
-                .fontSize(16)
-                .fontWeight(FontWeight.Medium)
-                .fontColor($r('app.color.status_error'))
-                .layoutWeight(1)
-                .textAlign(TextAlign.Start)
-            }
-              .width('100%')
-              .height('100%')
-              .padding({ left: 16, right: 14 })
-          }
-            .width('100%')
-            .height(58)
-            .padding(0)
-            .backgroundColor($r('sys.color.comp_background_primary'))
-            .borderRadius(20)
-            .enabled(this.backgroundClearEnabled)
-            .opacity(this.backgroundClearEnabled ? 1 : 0.42)
-            .id('native-settings-clear-background')
-            .onClick(() => this.onClearBackground())
-
           Column({ space: 0 }) {
             this.ToggleRow($r('app.string.native_settings_immersive_color'),
               $r('app.string.native_settings_immersive_color_desc'), this.immersiveColorEnabled,
-              (value: boolean) => this.onImmersiveColorChange(value))
+              (value: boolean) => this.immersiveColorEnabled = value)
+            Divider().color($r('sys.color.comp_divider')).margin({ left: 16, right: 16 })
+            this.ToggleRow($r('app.string.native_settings_immersive_light'),
+              $r('app.string.native_settings_immersive_light_desc'), this.immersiveLightEnabled,
+              (value: boolean) => this.immersiveLightEnabled = value)
           }
             .width('100%')
             .backgroundColor($r('sys.color.comp_background_primary'))
@@ -721,6 +704,19 @@ export struct NativeSettingsNavigation {
             .borderRadius(20)
             .clip(true)
 
+          Column({ space: 0 }) {
+            this.ToggleRow($r('app.string.native_settings_hdr'),
+              $r('app.string.native_settings_hdr_desc'), this.hdrEnabled,
+              (value: boolean) => this.hdrEnabled = value)
+            Divider().color($r('sys.color.comp_divider')).margin({ left: 16, right: 16 })
+            this.ToggleRow($r('app.string.native_settings_floating_tabs'),
+              $r('app.string.native_settings_floating_tabs_desc'), this.floatingTabsEnabled,
+              (value: boolean) => this.floatingTabsEnabled = value)
+          }
+            .width('100%')
+            .backgroundColor($r('sys.color.comp_background_primary'))
+            .borderRadius(20)
+            .clip(true)
         }
           .width('100%')
           .padding({ left: 18, right: 18, bottom: 28 })
@@ -729,10 +725,6 @@ export struct NativeSettingsNavigation {
         .layoutWeight(1)
         .edgeEffect(EdgeEffect.Spring)
         .scrollBar(BarState.Auto)
-        .nestedScroll({
-          scrollForward: NestedScrollMode.PARENT_FIRST,
-          scrollBackward: NestedScrollMode.SELF_FIRST
-        })
     }
       .width('100%')
       .height('100%')
@@ -742,7 +734,7 @@ export struct NativeSettingsNavigation {
   @Builder
   private AnimationPage(): void {
     Column() {
-      this.TopBar($r('app.string.native_settings_animation'), false)
+      this.TopBar($r('app.string.native_settings_animation'), true)
       Scroll() {
         Column({ space: 14 }) {
           this.PreviewCard()
@@ -777,10 +769,6 @@ export struct NativeSettingsNavigation {
         .layoutWeight(1)
         .edgeEffect(EdgeEffect.Spring)
         .scrollBar(BarState.Auto)
-        .nestedScroll({
-          scrollForward: NestedScrollMode.PARENT_FIRST,
-          scrollBackward: NestedScrollMode.SELF_FIRST
-        })
     }
       .width('100%')
       .height('100%')
@@ -892,10 +880,6 @@ export struct NativeSettingsNavigation {
         .layoutWeight(1)
         .edgeEffect(EdgeEffect.Spring)
         .scrollBar(BarState.Auto)
-        .nestedScroll({
-          scrollForward: NestedScrollMode.PARENT_FIRST,
-          scrollBackward: NestedScrollMode.SELF_FIRST
-        })
     }
       .width('100%')
       .height('100%')
@@ -939,17 +923,15 @@ export struct NativeSettingsNavigation {
   }
 
   build() {
-    Column() {
-      if (this.pageName === 'animation') {
-        this.AnimationPage()
-      } else {
-        this.BackgroundPage()
-      }
+    Navigation(this.navPathStack) {
+      this.SettingsHome()
     }
+      .navDestination(this.PageMap)
+      .hideNavBar(true)
+      .mode(NavigationMode.Stack)
       .width('100%')
       .height('100%')
       .backgroundColor($r('sys.color.background_secondary'))
-      .id(this.pageName === 'animation' ?
-        'native-animation-settings' : 'native-background-material-settings')
+      .id('native-settings-navigation')
   }
 }

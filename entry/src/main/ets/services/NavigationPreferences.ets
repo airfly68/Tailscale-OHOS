@@ -60,11 +60,11 @@ export class NavigationPreferences {
       }
     });
     const hidden: NavigationTabId[] = NavigationPreferences.parseList(hiddenValue)
-      .filter((id: NavigationTabId) => id !== 'settings' && order.includes(id));
+      .filter((id: NavigationTabId) => order.includes(id));
     if (hidden.length >= order.length) {
       return {
         order: order,
-        hidden: order.filter((id: NavigationTabId) => id !== 'home' && id !== 'settings'),
+        hidden: order.filter((id: NavigationTabId) => id !== 'home'),
         bottomMargin: NavigationPreferences.normalizeBottomMargin(bottomMarginValue)
       };
     }

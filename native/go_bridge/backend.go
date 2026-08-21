@@ -39,36 +39,32 @@ import (
 )
 
 type backendController struct {
-	mu                     sync.Mutex
-	loginMu                sync.Mutex
-	taildropMu             sync.Mutex
-	taildriveMu            sync.Mutex
-	server                 *tsnet.Server
-	client                 *local.Client
-	starting               bool
-	startErr               string
-	phase                  string
-	externalTun            bool
-	tunDevice              *harmonyTunDevice
-	stateDir               string
-	subnetRoutes           int
-	generation             uint64
-	cancelStart            context.CancelFunc
-	taildropStop           context.CancelFunc
-	taildropTask           taildropTransferSnapshot
-	taildropWatchStop      context.CancelFunc
-	taildropIncoming       []taildropIncomingFile
-	taildriveStop          context.CancelFunc
-	taildriveTask          taildriveTransferSnapshot
-	meshArcDeviceSyncStop  context.CancelFunc
-	meshArcDeviceRefreshMu sync.Mutex
-	meshArcDeviceStatuses  map[string]meshArcDeviceStatus
-	meshArcDeviceFailures  map[string]int
-	meshArcDeviceSyncReady bool
-	meshArcReceiverStatus  meshArcReceiverStatus
-	osVersion              string
-	loginStarted           bool
-	loginGeneration        uint64
+	mu                    sync.Mutex
+	loginMu               sync.Mutex
+	taildropMu            sync.Mutex
+	taildriveMu           sync.Mutex
+	server                *tsnet.Server
+	client                *local.Client
+	starting              bool
+	startErr              string
+	phase                 string
+	externalTun           bool
+	tunDevice             *harmonyTunDevice
+	stateDir              string
+	subnetRoutes          int
+	generation            uint64
+	cancelStart           context.CancelFunc
+	taildropStop          context.CancelFunc
+	taildropTask          taildropTransferSnapshot
+	taildropWatchStop     context.CancelFunc
+	taildropIncoming      []taildropIncomingFile
+	taildriveStop         context.CancelFunc
+	taildriveTask         taildriveTransferSnapshot
+	meshArcDeviceSyncStop context.CancelFunc
+	meshArcDeviceStatuses map[string]meshArcDeviceStatus
+	osVersion             string
+	loginStarted          bool
+	loginGeneration       uint64
 }
 
 var harmonyBackend backendController
@@ -188,14 +184,13 @@ type networkPreferences struct {
 }
 
 type backendSnapshot struct {
-	Status          string                `json:"status"`
-	ExitNodes       []exitNodeChoice      `json:"exitNodes"`
-	Peers           []peerSummary         `json:"peers"`
-	NetworkSettings networkPreferences    `json:"networkSettings"`
-	Account         accountSummary        `json:"account"`
-	Taildrop        taildropSnapshot      `json:"taildrop"`
-	Taildrive       taildriveSnapshot     `json:"taildrive"`
-	MeshArcReceiver meshArcReceiverStatus `json:"meshArcReceiver"`
+	Status          string             `json:"status"`
+	ExitNodes       []exitNodeChoice   `json:"exitNodes"`
+	Peers           []peerSummary      `json:"peers"`
+	NetworkSettings networkPreferences `json:"networkSettings"`
+	Account         accountSummary     `json:"account"`
+	Taildrop        taildropSnapshot   `json:"taildrop"`
+	Taildrive       taildriveSnapshot  `json:"taildrive"`
 }
 
 type taildropTargetSummary struct {
@@ -330,9 +325,6 @@ func (b *backendController) stop() string {
 	b.taildropWatchStop = nil
 	b.meshArcDeviceSyncStop = nil
 	b.meshArcDeviceStatuses = nil
-	b.meshArcDeviceFailures = nil
-	b.meshArcDeviceSyncReady = false
-	b.meshArcReceiverStatus = meshArcReceiverStatus{State: "idle"}
 	b.taildropIncoming = nil
 	b.mu.Unlock()
 	if cancelStart != nil {
@@ -433,7 +425,6 @@ func (b *backendController) startWithDevice(stateDir, deviceModel, controlURL st
 	b.tunDevice = device
 	b.stateDir = profileStateDir
 	b.cancelStart = cancelStart
-	b.meshArcReceiverStatus = meshArcReceiverStatus{State: "idle"}
 	b.mu.Unlock()
 
 	go b.startAsync(server, profileStateDir, generation, startContext)
@@ -470,9 +461,6 @@ func (b *backendController) restartWithTun(
 	b.taildropWatchStop = nil
 	b.meshArcDeviceSyncStop = nil
 	b.meshArcDeviceStatuses = nil
-	b.meshArcDeviceFailures = nil
-	b.meshArcDeviceSyncReady = false
-	b.meshArcReceiverStatus = meshArcReceiverStatus{State: "idle"}
 	b.taildropIncoming = nil
 	b.mu.Unlock()
 	if cancelStart != nil {
@@ -643,7 +631,6 @@ func (b *backendController) peers() string {
 	b.mu.Lock()
 	client := b.client
 	localSendStatuses := b.meshArcDeviceStatusesSnapshotLocked()
-	localSendStatusReady := b.meshArcDeviceSyncReady
 	b.mu.Unlock()
 	if client == nil {
 		return "[]"
@@ -654,7 +641,7 @@ func (b *backendController) peers() string {
 	if err != nil || status.BackendState != "Running" {
 		return "[]"
 	}
-	peers := buildPeerSummariesWithLocalSend(ctx, client, status, localSendStatuses, localSendStatusReady)
+	peers := buildPeerSummariesWithLocalSend(ctx, client, status, localSendStatuses)
 	sort.Slice(peers, func(i, j int) bool {
 		if peers[i].Online != peers[j].Online {
 			return peers[i].Online
@@ -756,8 +743,6 @@ func (b *backendController) snapshot() string {
 	serverPresent := b.server != nil
 	stateDir := b.stateDir
 	localSendStatuses := b.meshArcDeviceStatusesSnapshotLocked()
-	localSendStatusReady := b.meshArcDeviceSyncReady
-	meshArcReceiver := b.meshArcReceiverStatus
 	b.mu.Unlock()
 
 	settings, err := readNetworkPreferences(stateDir)
@@ -774,8 +759,7 @@ func (b *backendController) snapshot() string {
 			IncomingFiles: b.taildropIncomingSnapshot(),
 			WaitingFiles:  []taildropWaitingFileSummary{}, Transfer: b.taildropTransferSnapshot(),
 		},
-		Taildrive:       taildriveSnapshot{State: "loading", Transfer: b.taildriveTransferSnapshot()},
-		MeshArcReceiver: meshArcReceiver,
+		Taildrive: taildriveSnapshot{State: "loading", Transfer: b.taildriveTransferSnapshot()},
 	}
 	switch {
 	case startErr != "":
@@ -809,8 +793,7 @@ func (b *backendController) snapshot() string {
 
 	snapshot.ExitNodes = buildExitNodeChoices(status, stateDir)
 	metadataCtx, metadataCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	snapshot.Peers = buildPeerSummariesWithLocalSend(metadataCtx, client, status, localSendStatuses,
-		localSendStatusReady)
+	snapshot.Peers = buildPeerSummariesWithLocalSend(metadataCtx, client, status, localSendStatuses)
 	metadataCancel()
 	snapshot.Taildrop = buildTaildropSnapshot(client, b.taildropTransferSnapshot(), b.taildropIncomingSnapshot())
 	snapshot.Taildrive = taildriveSnapshot{State: "ready", Transfer: b.taildriveTransferSnapshot()}
@@ -1569,12 +1552,12 @@ func buildPeerSummaries(status *ipnstate.Status) []peerSummary {
 func buildPeerSummariesWithClient(
 	ctx context.Context, client *local.Client, status *ipnstate.Status,
 ) []peerSummary {
-	return buildPeerSummariesWithLocalSend(ctx, client, status, nil, false)
+	return buildPeerSummariesWithLocalSend(ctx, client, status, nil)
 }
 
 func buildPeerSummariesWithLocalSend(
 	ctx context.Context, client *local.Client, status *ipnstate.Status,
-	localSendStatuses map[string]meshArcDeviceStatus, localSendStatusReady bool,
+	localSendStatuses map[string]meshArcDeviceStatus,
 ) []peerSummary {
 	peers := make([]peerSummary, 0, len(status.Peer))
 	for peerKey, peer := range status.Peer {
@@ -1594,9 +1577,6 @@ func buildPeerSummariesWithLocalSend(
 			localSend = localSendStatuses[key]
 			if localSend.State == "" {
 				localSend.State = "checking"
-				if localSendStatusReady {
-					localSend.State = "unavailable"
-				}
 			}
 		} else {
 			localSend.State = "offline"
@@ -1992,7 +1972,7 @@ func (b *backendController) peerProbe() string {
 	return "SKIPPED | peer TSMP probe | no IPv4 peer"
 }
 
-// peerConnectivity performs one bounded path probe against a UI-selected peer. The
+// peerConnectivity performs three TSMP probes against a UI-selected peer. The
 // UI passes only the stable hashed peer key and the result contains aggregate
 // reachability metrics, never the peer address, name, endpoint, or key.
 func (b *backendController) peerConnectivity(peerKey string) string {
@@ -2047,13 +2027,13 @@ func (b *backendController) peerConnectivity(peerKey string) string {
 
 	// PingDisco is Tailscale's path-discovery primitive. Unlike TSMP it reports
 	// direct endpoints, peer relays, and DERP regions without guessing from RTT.
-	const attempts = 1
+	const attempts = 2
 	latencies := make([]int, 0, attempts)
 	result.Sent = attempts
 	pathType := "unknown"
 	relayRegion := ""
 	for attempt := 0; attempt < attempts; attempt++ {
-		pingCtx, pingCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		pingResult, pingErr := client.Ping(pingCtx, target, tailcfg.PingDisco)
 		pingCancel()
 		if pingErr == nil && pingResult != nil && pingResult.Err == "" {
@@ -2069,6 +2049,9 @@ func (b *backendController) peerConnectivity(peerKey string) string {
 				pathType = "derp"
 				relayRegion = pingResult.DERPRegionCode
 			}
+		}
+		if attempt+1 < attempts {
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 	result.Received = len(latencies)
@@ -2233,7 +2216,7 @@ func (b *backendController) mediaServiceProbe(peerKey string) string {
 		result.ErrorMessage = "backend_unavailable"
 		return marshalMediaProbe(result)
 	}
-	statusCtx, statusCancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	status, err := client.Status(statusCtx)
 	statusCancel()
 	if err != nil {
@@ -2264,7 +2247,7 @@ func (b *backendController) mediaServiceProbe(peerKey string) string {
 		return marshalMediaProbe(result)
 	}
 
-	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 3500*time.Millisecond)
 	defer probeCancel()
 	type mediaProbeTarget struct {
 		baseURL string

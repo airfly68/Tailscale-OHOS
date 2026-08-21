@@ -93,11 +93,6 @@ func TSBackendSnapshot() *C.char {
 	return C.CString(harmonyBackend.snapshot())
 }
 
-//export TSBackendLocalSendRefresh
-func TSBackendLocalSendRefresh() *C.char {
-	return C.CString(harmonyBackend.refreshMeshArcDevices())
-}
-
 //export TSBackendTaildropIncomingSnapshot
 func TSBackendTaildropIncomingSnapshot() *C.char {
 	return C.CString(harmonyBackend.taildropIncomingSnapshotJSON())
