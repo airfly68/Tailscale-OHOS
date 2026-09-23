@@ -5,16 +5,16 @@
 # Note: GOROOT prefers ~/.ohos-go-build/ohos-go (internal APFS disk). Building or
 # self-hosting the toolchain from the project volume (/Volumes/nvme11-...) hits
 # SIGBUS when freshly written binaries are mmapped for execution, so the toolchain
-# bootstrap and all caches live on the internal disk. Sources on the volume are
-# only read, and only the final .so is written back.
+# bootstrap and all caches live on the internal disk. The selected source trees
+# receive the integration patches; the final .so and .h are copied back.
 set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --- locate the OHOS Go toolchain (internal-disk build first) ---
-go_root="$HOME/.ohos-go-build/ohos-go"
+go_root="${OHOS_GO_ROOT:-$HOME/.ohos-go-build/ohos-go}"
 go_bin="$go_root/bin/go"
-if [[ ! -x "$go_bin" ]]; then
+if [[ -z "${OHOS_GO_ROOT:-}" && ! -x "$go_bin" ]]; then
   go_root="$project_root/third_party/ohos-go"
   go_bin="$go_root/bin/go"
 fi
@@ -64,17 +64,8 @@ apply_patch() {
     echo "Applied patch: $patch"
   fi
 }
-# the internal-disk toolchain copy may lack .git; detect its patch by marker
-if grep -q "_C_freeifaddrs" "$go_root/src/net/cgo_unix_cgo.go" 2>/dev/null; then
-  echo "ohos-go patch already present in toolchain"
-else
-  apply_patch "$go_root" "$project_root/patches/ohos-go-interface-resources.patch"
-fi
-if git -C "$project_root/third_party/tailscale" diff --quiet 2>/dev/null; then
-  apply_patch "$project_root/third_party/tailscale" "$project_root/patches/tailscale-ohos.patch"
-else
-  echo "tailscale patch already applied (working tree differs from tag)"
-fi
+apply_patch "$go_root" "$project_root/patches/ohos-go-interface-resources.patch"
+apply_patch "$project_root/third_party/tailscale" "$project_root/patches/tailscale-ohos.patch"
 
 # --- build the c-shared library ---
 export GOROOT="$go_root"
@@ -89,8 +80,8 @@ export GOMODCACHE="$HOME/.ohos-go-build/gomodcache"
 export GOPATH="$HOME/.ohos-go-build/gopath"
 # goproxy.cn keeps module downloads working without a global proxy
 export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
-export CC="$clang --target=aarch64-linux-ohos --sysroot=$sysroot -D__MUSL__"
-export CXX="$clangxx --target=aarch64-linux-ohos --sysroot=$sysroot -D__MUSL__"
+export CC="\"$clang\" --target=aarch64-linux-ohos --sysroot=\"$sysroot\" -D__MUSL__"
+export CXX="\"$clangxx\" --target=aarch64-linux-ohos --sysroot=\"$sysroot\" -D__MUSL__"
 
 cd "$project_root/native/go_bridge"
 go build -buildmode=c-shared -trimpath \

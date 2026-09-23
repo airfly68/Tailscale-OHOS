@@ -1,10 +1,20 @@
 #!/bin/bash
 # macOS port of scripts/build.ps1: wires DevEco's hvigor into the project,
-# builds the Go core, then assembles the HAP. Usage: scripts/build.sh [default|release]
+# builds the Go core, then assembles a Debug HAP. Usage: scripts/build.sh [default]
 set -euo pipefail
 
 Product="${1:-default}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$#" -gt 1 || "$Product" != default ]]; then
+  echo 'This macOS entry supports only the default Debug product.' >&2
+  echo 'For Release, confirm the release review and changelog, then use scripts/build.ps1 -Product release on Windows.' >&2
+  exit 1
+fi
+cd "$ROOT"
+[[ -f build-profile.json5 ]] || {
+  echo 'Copy build-profile.example.json5 to build-profile.json5 and configure your SDK first.' >&2
+  exit 1
+}
 
 if [[ -n "${DEVECO_STUDIO_HOME:-}" && -d "$DEVECO_STUDIO_HOME/sdk" ]]; then
   deveco_home="$DEVECO_STUDIO_HOME"
@@ -17,12 +27,13 @@ fi
 
 hvigor_home="$deveco_home/tools/hvigor/hvigor"
 hvigor="$hvigor_home/bin/hvigor.js"
+hvigor_wrapper="$deveco_home/tools/hvigor/bin/hvigorw.js"
 # macOS JBR layout differs from Windows
 java_home="$deveco_home/jbr/Contents/Home"
 node_bin="$deveco_home/tools/node/bin"
 sdk_home="${DEVECO_SDK_HOME:-$deveco_home/sdk}"
 
-[[ -f "$hvigor" ]] || { echo "DevEco Hvigor was not found at $hvigor" >&2; exit 1; }
+[[ -f "$hvigor_wrapper" || -f "$hvigor" ]] || { echo "DevEco Hvigor was not found under $deveco_home" >&2; exit 1; }
 
 # symlinks stand in for the NTFS junctions used by the PowerShell script
 tooling_scope="$ROOT/.tooling/node_modules/@ohos"
@@ -39,6 +50,12 @@ export NODE_PATH="$ROOT/.tooling/node_modules:$hvigor_home/node_modules:$deveco_
 
 "$ROOT/scripts/build-go.sh"
 
-node "$hvigor" --mode module -p module=entry@default -p product="$Product" assembleHap --no-daemon
+if [[ -f "$hvigor_wrapper" ]]; then
+  # Match the verified Windows flow: the wrapper resolves the project's engine.
+  unset NODE_PATH
+  hvigor="$hvigor_wrapper"
+fi
+node "$hvigor" --mode module -p module=entry@default -p product="$Product" \
+  -p buildMode=debug -p debuggable=true assembleHap --no-daemon
 
-find "$ROOT/entry/build" -name '*.hap' -print
+printf 'HAP output: %s\n' "$ROOT/entry/build/default/outputs/default/"

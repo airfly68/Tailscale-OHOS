@@ -1,15 +1,16 @@
 diff --git a/client/tailscale/apitype/apitype.go b/client/tailscale/apitype/apitype.go
-index 58cdcec..2d03a37 100644
+index 58cdcec..c3cd8bb 100644
 --- a/client/tailscale/apitype/apitype.go
 +++ b/client/tailscale/apitype/apitype.go
-@@ -54,6 +54,10 @@ type FileTarget struct {
+@@ -52,8 +52,9 @@ type FileTarget struct {
+ }
+ 
  type WaitingFile struct {
- 	Name string
- 	Size int64
-+	// ReceivedAtMs is the unix-millisecond timestamp at which the file was
-+	// received. Zero when unknown. (Backport of the field added upstream after
-+	// v1.86.5; the HarmonyOS go_bridge sorts waiting files by it.)
-+	ReceivedAtMs int64
+-	Name string
+-	Size int64
++	Name         string
++	Size         int64
++	ReceivedAtMs int64 `json:"receivedAtMs,omitempty"`
  }
  
  // SetPushDeviceTokenRequest is the body POSTed to the LocalAPI endpoint /set-device-token.
@@ -176,18 +177,23 @@ index 8a3904f..8054012 100644
  	return true
  }
 diff --git a/feature/taildrop/retrieve.go b/feature/taildrop/retrieve.go
-index b048a1b..10d17cd 100644
+index b048a1b..3c65510 100644
 --- a/feature/taildrop/retrieve.go
 +++ b/feature/taildrop/retrieve.go
-@@ -87,8 +87,9 @@ func (m *manager) WaitingFiles() ([]apitype.WaitingFile, error) {
+@@ -86,9 +86,14 @@ func (m *manager) WaitingFiles() ([]apitype.WaitingFile, error) {
+ 		if err != nil {
  			continue
  		}
++		receivedAtMs := int64(0)
++		if !fi.ModTime().IsZero() {
++			receivedAtMs = fi.ModTime().UnixMilli()
++		}
  		ret = append(ret, apitype.WaitingFile{
 -			Name: name,
 -			Size: fi.Size(),
 +			Name:         name,
 +			Size:         fi.Size(),
-+			ReceivedAtMs: fi.ModTime().UnixMilli(),
++			ReceivedAtMs: receivedAtMs,
  		})
  	}
  	sort.Slice(ret, func(i, j int) bool { return ret[i].Name < ret[j].Name })
@@ -237,7 +243,7 @@ index e7ae2d6..74a9cb3 100644
  		e.SSH_HostKeys = v
  	}
 diff --git a/tsnet/tsnet.go b/tsnet/tsnet.go
-index 65367f2..29c6eb0 100644
+index 65367f2..cd36fc2 100644
 --- a/tsnet/tsnet.go
 +++ b/tsnet/tsnet.go
 @@ -26,9 +26,11 @@
@@ -360,7 +366,7 @@ index 65367f2..29c6eb0 100644
  		ControlKnobs:  sys.ControlKnobs(),
  		HealthTracker: sys.HealthTracker(),
  		Metrics:       sys.UserMetricsRegistry(),
-+	DriveForLocal: s.taildriveFS,
++		DriveForLocal: s.taildriveFS,
  	})
  	if err != nil {
  		return err
